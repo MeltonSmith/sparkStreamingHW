@@ -4,7 +4,7 @@ import org.apache.avro.SchemaBuilder
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.avro.functions._
 import org.apache.spark.sql.streaming.Trigger
-import org.apache.spark.sql.functions.{col, from_json, lit, schema_of_json}
+import org.apache.spark.sql.functions.{col, concat, expr, from_json, lit, schema_of_json}
 import org.apache.spark.sql.types.{DecimalType, DoubleType, IntegerType, LongType, StringType, StructField, StructType}
 
 import scala.concurrent.duration.DurationInt
@@ -52,48 +52,60 @@ object App {
     import spark.implicits._
 
     //TODO works
-//    val frame = spark.readStream
-//                      .format("avro")
-//                      .schema(StructType(getExpediaInputSchema))
-//                      .load("/201 HW Dataset/expedia")
+    val expedia = spark.readStream
+                      .format("avro")
+                      .schema(StructType(getExpediaInputSchema))
+                      .load("/201 HW Dataset/expedia")
+
+
+    //TODO persist?
+
+    val yearForExpedia = "2016"
+    val expedia2016 = expedia
+                        .where("year(CAST(srch_ci AS DATE)) == " + yearForExpedia)
+                        .withColumn("key", concat(col("hotel_id"),
+                                                                        lit("/"),
+                                                                        col("srch_ci")))
+
+
+
+
 //
-//    val query = frame
-//                  .withColumnRenamed("srch_ci", "value")
-//                  .writeStream
-//                  .outputMode("append")
-//                  .format("kafka")
-//                  .option("kafka.bootstrap.servers", "localhost:9094")
-//                  .option("checkpointLocation", "tmp/dsd")
-//                  .option("topic", "topic1488")
-//                  .start()
-
-
-
-    //
-    val hotelsKafka = spark.readStream
+    val hotelDailyKafka = spark.readStream
                           .format("kafka")
                           .option("kafka.bootstrap.servers", "localhost:9094")
                           .option("startingOffsets", "earliest")
                           .option("subscribe", hotelsWeatherTopic)
                           .load()
-                          .selectExpr("CAST(key AS STRING) as key", "CAST(value AS STRING) as value", "timestamp")
+                          .selectExpr("CAST(key AS STRING) as key", "CAST(value AS STRING) as value", "CAST(timestamp AS Timestamp) as timestamp")
                           .withColumn("jsonData", from_json(col("value"), StructType(getHotelDailyValueSchema))).as("data")
                           .select("key", "jsonData.*", "timestamp")
-                          .where(col("avg_tmpr_c").isNotNull)
+                          .where(col("avg_tmpr_c").isNotNull
+                                .and
+                                (col("avg_tmpr_c").gt(0))
+                          )
+
+    //enriching with weather
+    val joinResult = expedia2016.as("exp")
+            .join(hotelDailyKafka.as("hotelDaily"),
+              $"hotelDaily.key" === $"exp.key"
+            )
+            .select("exp.*", "hotelDaily.avg_tmpr_c")
 
 
 
-//    hotelsKafka.selectExpr("CAST(key AS STRING)", "CAST(value AS STRING)")
-//                .as[(String, String)]
+//    val query = hotelDailyKakfa
+//                            .writeStream
+//                            .outputMode("append")
+//                            .format("console")
+//                            .option("truncate", value = false)
+//                            .start()
 
-    val query = hotelsKafka
-//                            .selectExpr("CAST(key AS STRING)", "CAST(value AS STRING)")
-                            .writeStream
-                            .outputMode("append")
-                            .format("console")
-                            .option("truncate", value = false)
-//                            .trigger(Trigger.ProcessingTime(10.seconds))
-                            .start()
+    val query = joinResult
+              .writeStream
+              .outputMode("append")
+              .format("console")
+              .start()
 
     query.awaitTermination()
 
@@ -103,7 +115,7 @@ object App {
 
 
 //    spark.readStream
-//                      .json(hotelsKafka.selectExpr("CAST(value as STRING) as value")
+//                      .json(hotelDailyKakfa.selectExpr("CAST(value as STRING) as value")
 //                                      .map(row => row.toString()))
 //                                      .as
 
