@@ -4,14 +4,41 @@ import org.apache.avro.SchemaBuilder
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.avro.functions._
 import org.apache.spark.sql.streaming.Trigger
-import org.apache.spark.sql.types.{LongType, StringType, StructField, StructType}
+import org.apache.spark.sql.functions.{col, from_json, lit, schema_of_json}
+import org.apache.spark.sql.types.{DecimalType, DoubleType, IntegerType, LongType, StringType, StructField, StructType}
 
 import scala.concurrent.duration.DurationInt
 
 /**
- * @author ${user.name}
+ *
+ * Perform Spark stateful streaming application. Use Spark Structured Streaming OR DStreams approach.
+
+Note: In case of Spark Structure Streaming you can broadcast initial state map due to relatively small data size.
+
+    Install and start Spark in WSL2. Use "Spark WSL2 Setup" guide for this. Or reuse Spark deployment from previous task.
+    Read Expedia data for 2016 year from HDFS on WSL2 and enrich it with weather: add average temperature at checkin (join with hotels+weaher data from Kafka topic).
+    Filter incoming data by having average temperature more than 0 Celsius degrees.
+    Calculate customer's duration of stay as days between requested check-in and check-out date.
+    Create customer preferences of stay time based on next logic.
+        Map each hotel with multi-dimensional state consisting of record counts for each type of stay:
+            "Erroneous data": null, more than month(30 days), less than or equal to 0
+            "Short stay": 1 day stay
+            "Standart stay": 2-7 days
+            "Standart extended stay": 1-2 weeks
+            "Long stay": 2-4 weeks (less than month)
+        Add most_popular_stay_type for a hotel (with max count)
+    Store it as initial state (For examples: hotel, batch_timestamp, erroneous_data_cnt, short_stay_cnt, standart_stay_cnt, standart_extended_stay_cnt, long_stay_cnt, most_popular_stay_type).
+    In streaming way read Expedia data for 2017 year from HDFS on WSL2. Read initial state, send it via broadcast into streaming. Repeat previous logic on the stream.
+    Apply additional variance with filter on children presence in booking (with_children: false - children <= 0; true - children > 0).
+    Store final data in HDFS. (Result will look like: hotel, with_children, batch_timestamp, erroneous_data_cnt, short_stay_cnt, standart_stay_cnt, standart_extended_stay_cnt, long_stay_cnt, most_popular_stay_type
+
+ *
+ * Created by: Ian_Rakhmatullin
+ * Date: 11.04.2021
  */
 object App {
+
+  val hotelsWeatherTopic = "hotelDailyData"
 
   def main(args : Array[String]) {
     val spark = SparkSession
@@ -21,52 +48,52 @@ object App {
 
     spark.sparkContext.setLogLevel("ERROR")
 
-//    val expedia = spark.read
-//                      .format("avro")
-//                      .load("/201 HW Dataset/expedia")
 
     import spark.implicits._
 
     //TODO works
-    val frame = spark.readStream
-                      .format("avro")
-                      .schema(StructType(getExpediaInputSchema))
-                      .load("/201 HW Dataset/expedia")
-
-    val query = frame
-                  .withColumnRenamed("srch_ci", "value")
-                  .writeStream
-                  .outputMode("append")
-                  .format("kafka")
-                  .option("kafka.bootstrap.servers", "localhost:9094")
-                  .option("checkpointLocation", "tmp/dsd")
-                  .option("topic", "topic1488")
-                  .start()
-
-//    val query = frame
-//                .writeStream
-//                .outputMode("append")
-//                .format("console")
-//                .start()
-
-
-
+//    val frame = spark.readStream
+//                      .format("avro")
+//                      .schema(StructType(getExpediaInputSchema))
+//                      .load("/201 HW Dataset/expedia")
 //
-//    val hotelsKafka = spark.readStream
-//                          .format("kafka")
-//                          .option("kafka.bootstrap.servers", "localhost:9094")
-//                          .option("subscribe", "daysUnique")
-//                          .load()
+//    val query = frame
+//                  .withColumnRenamed("srch_ci", "value")
+//                  .writeStream
+//                  .outputMode("append")
+//                  .format("kafka")
+//                  .option("kafka.bootstrap.servers", "localhost:9094")
+//                  .option("checkpointLocation", "tmp/dsd")
+//                  .option("topic", "topic1488")
+//                  .start()
 
-//    val query = hotelsKafka.selectExpr("CAST(value as STRING) as value")
-//                            .as[(String)]
-//                            .groupBy("value")
-//                            .count()
-//                            .writeStream
-//                            .outputMode("complete")
-//                            .format("console")
+
+
+    //
+    val hotelsKafka = spark.readStream
+                          .format("kafka")
+                          .option("kafka.bootstrap.servers", "localhost:9094")
+                          .option("startingOffsets", "earliest")
+                          .option("subscribe", hotelsWeatherTopic)
+                          .load()
+                          .selectExpr("CAST(key AS STRING) as key", "CAST(value AS STRING) as value", "timestamp")
+                          .withColumn("jsonData", from_json(col("value"), StructType(getHotelDailyValueSchema))).as("data")
+                          .select("key", "jsonData.*", "timestamp")
+                          .where(col("avg_tmpr_c").isNotNull)
+
+
+
+//    hotelsKafka.selectExpr("CAST(key AS STRING)", "CAST(value AS STRING)")
+//                .as[(String, String)]
+
+    val query = hotelsKafka
+//                            .selectExpr("CAST(key AS STRING)", "CAST(value AS STRING)")
+                            .writeStream
+                            .outputMode("append")
+                            .format("console")
+                            .option("truncate", value = false)
 //                            .trigger(Trigger.ProcessingTime(10.seconds))
-//                            .start()
+                            .start()
 
     query.awaitTermination()
 
@@ -88,6 +115,17 @@ object App {
       StructField("srch_ci", StringType),
       StructField("srch_co", StringType),
       StructField("hotel_id", LongType),
+    )
+  }
+
+  private def getHotelDailyValueSchema = {
+    List(
+      StructField("Id", LongType, nullable = false),
+      StructField("wthr_date", StringType, nullable = false),
+      StructField("avg_tmpr_c", DoubleType, nullable = true),
+      StructField("year", StringType, nullable = false),
+      StructField("month", StringType, nullable = false),
+      StructField("day", StringType, nullable = false),
     )
   }
 
