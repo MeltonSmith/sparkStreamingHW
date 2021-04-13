@@ -4,7 +4,7 @@ import org.apache.avro.SchemaBuilder
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.avro.functions._
 import org.apache.spark.sql.streaming.Trigger
-import org.apache.spark.sql.functions.{col, concat, expr, from_json, lit, schema_of_json}
+import org.apache.spark.sql.functions.{col, concat, count, current_timestamp, expr, from_json, lit, schema_of_json, sum, when}
 import org.apache.spark.sql.types.{DecimalType, DoubleType, IntegerType, LongType, StringType, StructField, StructType}
 
 import scala.concurrent.duration.DurationInt
@@ -38,13 +38,15 @@ Note: In case of Spark Structure Streaming you can broadcast initial state map d
  */
 object App {
 
-  val hotelsWeatherTopic = "hotelDailyData"
+  val hotelsWeatherTopic = "hotelDailyDataUnique"
+  val yearForExpedia = "2016"
+  val durationOfStay = "durationOfStay"
 
   def main(args : Array[String]) {
     val spark = SparkSession
-      .builder
-      .appName("sparkStreamingHW2")
-      .getOrCreate()
+                    .builder
+                    .appName("sparkStreamingHW2")
+                    .getOrCreate()
 
     spark.sparkContext.setLogLevel("ERROR")
 
@@ -60,26 +62,24 @@ object App {
 
     //TODO persist?
 
-    val yearForExpedia = "2016"
+
     val expedia2016 = expedia
                         .where("year(CAST(srch_ci AS DATE)) == " + yearForExpedia)
+                        .withColumn(durationOfStay, expr("(day(CAST(srch_co AS DATE))) - (day(CAST(srch_ci AS DATE)))"))
                         .withColumn("key", concat(col("hotel_id"),
                                                                         lit("/"),
                                                                         col("srch_ci")))
 
-
-
-
-//
     val hotelDailyKafka = spark.readStream
                           .format("kafka")
                           .option("kafka.bootstrap.servers", "localhost:9094")
                           .option("startingOffsets", "earliest")
                           .option("subscribe", hotelsWeatherTopic)
                           .load()
-                          .selectExpr("CAST(key AS STRING) as key", "CAST(value AS STRING) as value", "CAST(timestamp AS Timestamp) as timestamp")
+                          .selectExpr("CAST(key AS STRING) as key", "CAST(value AS STRING) as value")
                           .withColumn("jsonData", from_json(col("value"), StructType(getHotelDailyValueSchema))).as("data")
-                          .select("key", "jsonData.*", "timestamp")
+                          .select("key", "jsonData.*")
+
                           .where(col("avg_tmpr_c").isNotNull
                                 .and
                                 (col("avg_tmpr_c").gt(0))
@@ -93,6 +93,42 @@ object App {
             .select("exp.*", "hotelDaily.avg_tmpr_c")
 
 
+//    Store it as initial state (For examples: hotel, batch_timestamp, erroneous_data_cnt, short_stay_cnt, standart_stay_cnt, standart_extended_stay_cnt, long_stay_cnt, most_popular_stay_type).
+
+//    "Erroneous data": null, more than month(30 days), less than or equal to 0
+//    "Short stay": 1 day stay
+//    "Standart stay": 2-7 days
+//      "Standart extended stay": 1-2 weeks
+//      "Long stay": 2-4 weeks (less than month)
+
+    val erroneousCondition = col(durationOfStay).isNull
+                      .or(col(durationOfStay).gt(30))
+                      .or(col(durationOfStay).leq(0))
+
+    val shortStayCond = col(durationOfStay).equalTo(1)
+    val standardStayCond = col(durationOfStay).between(2, 7)
+    val standardExtendedStayCond = col(durationOfStay).between(8, 14)
+    val longStayCond = col(durationOfStay).between(15, 29)
+
+    //TODO get rid of the hardcode below
+    val query = joinResult
+                  .withColumn("batch_timestamp", current_timestamp())
+                  .withWatermark("batch_timestamp", "5 minutes")
+                  .groupBy("hotel_id", "batch_timestamp")
+                  .agg(
+                    count(when(erroneousCondition, true)).as("erroneous_data_cnt"),
+                    count(when(shortStayCond, true)).as("short_stay_cnt"),
+                    count(when(standardStayCond, true)).as("standard_stay_cnt"),
+                    count(when(standardExtendedStayCond, true)).as("standard_extended_stay_cnt"),
+                    count(when(longStayCond, true)).as("long_stay_cnt")
+                  )
+                  .writeStream
+                  .outputMode("append")
+                  .format("console")
+                  .start()
+
+
+
 
 //    val query = hotelDailyKakfa
 //                            .writeStream
@@ -101,11 +137,11 @@ object App {
 //                            .option("truncate", value = false)
 //                            .start()
 
-    val query = joinResult
-              .writeStream
-              .outputMode("append")
-              .format("console")
-              .start()
+//    val query = joinResult
+//              .writeStream
+//              .outputMode("append")
+//              .format("console")
+//              .start()
 
     query.awaitTermination()
 
