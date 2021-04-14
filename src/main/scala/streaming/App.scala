@@ -4,8 +4,9 @@ import org.apache.avro.SchemaBuilder
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.avro.functions._
 import org.apache.spark.sql.streaming.Trigger
-import org.apache.spark.sql.functions.{col, concat, count, current_timestamp, expr, from_json, lit, schema_of_json, sum, when}
-import org.apache.spark.sql.types.{DecimalType, DoubleType, IntegerType, LongType, StringType, StructField, StructType}
+import org.apache.spark.sql.functions.{col, concat, count, current_timestamp, expr, from_json, greatest, lit, schema_of_json, sum, when, window}
+import org.apache.spark.sql.streaming.Trigger.ProcessingTime
+import org.apache.spark.sql.types.{DecimalType, DoubleType, IntegerType, LongType, StringType, StructField, StructType, TimestampType}
 
 import scala.concurrent.duration.DurationInt
 
@@ -76,10 +77,9 @@ object App {
                           .option("startingOffsets", "earliest")
                           .option("subscribe", hotelsWeatherTopic)
                           .load()
-                          .selectExpr("CAST(key AS STRING) as key", "CAST(value AS STRING) as value")
+                          .selectExpr("CAST(key AS STRING) as key", "CAST(value AS STRING) as value", "CAST(timestamp AS Timestamp) as timestamp")
                           .withColumn("jsonData", from_json(col("value"), StructType(getHotelDailyValueSchema))).as("data")
-                          .select("key", "jsonData.*")
-
+                          .select("key", "jsonData.*", "timestamp")
                           .where(col("avg_tmpr_c").isNotNull
                                 .and
                                 (col("avg_tmpr_c").gt(0))
@@ -90,16 +90,15 @@ object App {
             .join(hotelDailyKafka.as("hotelDaily"),
               $"hotelDaily.key" === $"exp.key"
             )
-            .select("exp.*", "hotelDaily.avg_tmpr_c")
+//      .withWatermark("timestamp", "2 seconds")
+      .select("exp.*", "hotelDaily.avg_tmpr_c")
+//      .groupBy("hotel_id", "timestamp").count()
+//      .groupBy( window($"timestamp", "2 seconds")).count()
+//      .writeStream
+//                      .outputMode("append")
+//                      .format("console")
+//                      .start()
 
-
-//    Store it as initial state (For examples: hotel, batch_timestamp, erroneous_data_cnt, short_stay_cnt, standart_stay_cnt, standart_extended_stay_cnt, long_stay_cnt, most_popular_stay_type).
-
-//    "Erroneous data": null, more than month(30 days), less than or equal to 0
-//    "Short stay": 1 day stay
-//    "Standart stay": 2-7 days
-//      "Standart extended stay": 1-2 weeks
-//      "Long stay": 2-4 weeks (less than month)
 
     val erroneousCondition = col(durationOfStay).isNull
                       .or(col(durationOfStay).gt(30))
@@ -110,10 +109,12 @@ object App {
     val standardExtendedStayCond = col(durationOfStay).between(8, 14)
     val longStayCond = col(durationOfStay).between(15, 29)
 
+
+    val greatestAmongTheCounts = greatest("erroneous_data_cnt", "short_stay_cnt", "standard_stay_cnt", "standard_extended_stay_cnt", "long_stay_cnt")
     //TODO get rid of the hardcode below
     val query = joinResult
                   .withColumn("batch_timestamp", current_timestamp())
-                  .withWatermark("batch_timestamp", "5 minutes")
+                  .withWatermark("batch_timestamp", "0 seconds")
                   .groupBy("hotel_id", "batch_timestamp")
                   .agg(
                     count(when(erroneousCondition, true)).as("erroneous_data_cnt"),
@@ -122,12 +123,18 @@ object App {
                     count(when(standardExtendedStayCond, true)).as("standard_extended_stay_cnt"),
                     count(when(longStayCond, true)).as("long_stay_cnt")
                   )
+                  .withColumn("most_popular_stay_type",
+                      when(greatestAmongTheCounts === $"short_stay_cnt", "Short Stay")
+                        .when(greatestAmongTheCounts === $"standard_stay_cnt", "Standard Stay")
+                        .when(greatestAmongTheCounts === $"standard_extended_stay_cnt", "Standard Extended Stay")
+                        .when(greatestAmongTheCounts === $"long_stay_cnt", "Long Stay")
+                        .otherwise("Erroneous")
+                    )
                   .writeStream
+                  .trigger(Trigger.ProcessingTime("10 seconds"))
                   .outputMode("append")
                   .format("console")
                   .start()
-
-
 
 
 //    val query = hotelDailyKakfa
