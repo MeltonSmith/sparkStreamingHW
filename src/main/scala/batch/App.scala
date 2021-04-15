@@ -57,16 +57,12 @@ object App {
 
 
   def main(args : Array[String]) {
-
-
-
     val spark = SparkSession
                     .builder
                     .appName("sparkStreamingHW2")
                     .getOrCreate()
 
     spark.sparkContext.setLogLevel("ERROR")
-
 
     import spark.implicits._
 
@@ -79,12 +75,6 @@ object App {
                           lit("/"),
                           col("srch_ci")))
                       .where("year(CAST(srch_ci AS DATE)) == " + firstYear)
-
-//    expedia.persist(StorageLevel.MEMORY_ONLY)
-
-
-//    val expedia2016 = expedia
-//                        .where("year(CAST(srch_ci AS DATE)) == " + firstYear)
 
     val hotelDailyKafka = spark
                           .read
@@ -129,7 +119,6 @@ object App {
                   )
 
 
-
     ////2017/////
     val expedia2017Stream = spark.readStream
                               .format("avro")
@@ -166,11 +155,9 @@ object App {
                             .when(greatestAmongTheCounts === $"long_stay_cnt", "Long Stay")
                             .otherwise("Erroneous")
                         )
-                      .select("hotel_id", "erroneous_data_cnt", "short_stay_cnt", "standard_stay_cnt", "standard_extended_stay_cnt", "long_stay_cnt", "most_popular_stay_type")
 
     //TODO Main idea
     // Union between streaming and batch DataFrames/Datasets is not supported;
-    //TODO union result2016+result2017, then, groupByKey and finally mapGroupsWithState
 
     result2017
         .union(broadcast(result2016))
