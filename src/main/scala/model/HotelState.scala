@@ -56,7 +56,7 @@ case class HotelState(hotel_id:Long, batch_timestamp:java.sql.Timestamp, var err
       case VisitType.standard_stay => standard_stay_cnt
       case VisitType.standard_extended_stay =>  standard_extended_stay_cnt
       case VisitType.long_stay =>  long_stay_cnt
-      case _ => throw new UnsupportedOperationException("Wrong visit type")ø
+      case _ => throw new UnsupportedOperationException("Wrong visit type")
     }
   }
 }
