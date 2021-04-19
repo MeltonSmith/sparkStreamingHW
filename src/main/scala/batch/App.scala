@@ -2,11 +2,14 @@ package batch
 
 import model.VisitType.defineVisitType
 import model.{HotelState, VisitType}
+import org.apache.commons.io.FileUtils
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.streaming.{GroupState, GroupStateTimeout, Trigger}
 import org.apache.spark.sql.types._
-import org.apache.spark.sql.{Column, Row, SparkSession}
+import org.apache.spark.sql.{Column, DataFrame, Dataset, ForeachWriter, Row, SparkSession}
 import org.apache.spark.storage.StorageLevel
+
+import java.io.{File, FileWriter}
 
 /**
  *
@@ -181,10 +184,32 @@ object App {
                 .groupByKey(row => row.getAs[Long](0))
                 .mapGroupsWithState(GroupStateTimeout.EventTimeTimeout())(updateFunction)
                 .writeStream
-                .trigger(Trigger.ProcessingTime("5 seconds"))
                 .outputMode("update")
-                .format("console")
+                .trigger(Trigger.ProcessingTime("20 seconds"))
+                .foreachBatch ((batchDF: Dataset[HotelState], batchId: Long) =>
+                  if (!batchDF.isEmpty){
+                    batchDF
+                      .repartition(1)
+                      .write
+                      .format("parquet")
+                      .save(s"/201 HW Dataset/finalResult/$batchId")
+                  }
+                )
                 .start()
+
+//    val query = joinResult2017.as("r2017")
+//                              .join(broadcast(result2016).as("r2016"),
+//                                Seq("hotel_id"),
+//                                "left_outer"
+//                              )
+//                              .withColumn("batch_timestamp", current_timestamp())
+//                              .withWatermark("batch_timestamp", "0 milliseconds")
+//                              .groupByKey(row => row.getAs[Long](0))
+//                              .mapGroupsWithState(GroupStateTimeout.EventTimeTimeout())(updateFunction)
+//                              .writeStream
+//                              .format("console")
+//                              .outputMode("update")
+//                              .start()
 
     query.awaitTermination()
   }
