@@ -185,7 +185,6 @@ object App {
                 .mapGroupsWithState(GroupStateTimeout.EventTimeTimeout())(updateFunction)
                 .writeStream
                 .outputMode("update")
-                .trigger(Trigger.ProcessingTime("20 seconds"))
                 .foreachBatch ((batchDF: Dataset[HotelState], batchId: Long) =>
                   if (!batchDF.isEmpty){
                     batchDF
