@@ -1,12 +1,15 @@
 package batch
 
+import model.{HotelState, VisitType}
 import org.apache.hadoop.fs.StorageType
 import org.apache.spark.network.protocol.Encoders
-import org.apache.spark.sql.{Column, Encoders, SparkSession}
+import org.apache.spark.sql.{Column, Encoders, Row, SparkSession}
 import org.apache.spark.sql.functions._
-import org.apache.spark.sql.streaming.{GroupStateTimeout, Trigger}
+import org.apache.spark.sql.streaming.{GroupState, GroupStateTimeout, Trigger}
 import org.apache.spark.sql.types._
 import org.apache.spark.storage.StorageLevel
+
+import java.sql.Timestamp
 
 /**
  *
@@ -42,7 +45,6 @@ object App {
   val secondYear = "2017"
   val durationOfStay = "durationOfStay"
 
-
   val erroneousCondition: Column = col(durationOfStay).isNull
     .or(col(durationOfStay).gt(30))
     .or(col(durationOfStay).leq(0))
@@ -52,9 +54,42 @@ object App {
   val standardExtendedStayCond: Column = col(durationOfStay).between(8, 14)
   val longStayCond: Column = col(durationOfStay).between(15, 29)
 
-
   val greatestAmongTheCounts: Column = greatest("erroneous_data_cnt", "short_stay_cnt", "standard_stay_cnt", "standard_extended_stay_cnt", "long_stay_cnt")
 
+  /**
+   * Eventually updates state for the group of hotel_id
+   */
+  def updateFunction(hotel_id:Long,
+                     inputs: Iterator[Row],
+                     oldState: GroupState[HotelState]):HotelState = {
+    val state: HotelState =
+      if (oldState.exists) oldState.get
+      else {
+        val row = inputs.next()
+
+        //in case of left join they may be nulls
+        val err_cnt = Option(row.get(7)).getOrElse(0).asInstanceOf[Int]
+        val short_cnt = Option(row.get(8)).getOrElse(0).asInstanceOf[Int]
+        val standard_cnt = Option(row.get(9)).getOrElse(0).asInstanceOf[Int]
+        val standard_ex_cnt = Option(row.get(10)).getOrElse(0).asInstanceOf[Int]
+        val long_stay_cnt = Option(row.get(11)).getOrElse(0).asInstanceOf[Int]
+        val stayTypeString = Option(row.getAs[String](12)).getOrElse("Erroneous")
+        val stayType = VisitType.withName(stayTypeString)
+
+        val justCreatedState = HotelState(hotel_id, new Timestamp(System.currentTimeMillis()), err_cnt, short_cnt, standard_cnt, standard_ex_cnt, long_stay_cnt, stayType)
+        val duration = Option(row.get(4)).orNull
+        val visitType = defineVisitType(duration)
+        justCreatedState.updateState(visitType)
+      }
+
+    for (input <- inputs) {
+      val duration = Option(input.getInt(4))
+      val visitType = defineVisitType(duration)
+      state.updateState(visitType)
+    }
+    oldState.setTimeoutDuration(10000)
+    state
+  }
 
   def main(args : Array[String]) {
     val spark = SparkSession
@@ -70,7 +105,7 @@ object App {
                       .format("avro")
                       .schema(StructType(getExpediaInputSchema))
                       .load("/201 HW Dataset/expedia")
-                      .withColumn(durationOfStay, expr("(day(CAST(srch_co AS DATE))) - (day(CAST(srch_ci AS DATE)))"))
+                      .withColumn(durationOfStay, expr("DATEDIFF((CAST(srch_co AS DATE)), (CAST(srch_ci AS DATE)))"))
                       .withColumn("key", concat(col("hotel_id"),
                           lit("/"),
                           col("srch_ci")))
@@ -104,11 +139,11 @@ object App {
     val result2016 = joinResult
                   .groupBy("hotel_id")
                   .agg(
-                    count(when(erroneousCondition, true)).as("erroneous_data_cnt"),
-                    count(when(shortStayCond, true)).as("short_stay_cnt"),
-                    count(when(standardStayCond, true)).as("standard_stay_cnt"),
-                    count(when(standardExtendedStayCond, true)).as("standard_extended_stay_cnt"),
-                    count(when(longStayCond, true)).as("long_stay_cnt")
+                    count(when(erroneousCondition, true)).cast(IntegerType).as("erroneous_data_cnt"),
+                    count(when(shortStayCond, true)).cast(IntegerType).as("short_stay_cnt"),
+                    count(when(standardStayCond, true)).cast(IntegerType).as("standard_stay_cnt"),
+                    count(when(standardExtendedStayCond, true)).cast(IntegerType).as("standard_extended_stay_cnt"),
+                    count(when(longStayCond, true)).cast(IntegerType).as("long_stay_cnt")
                   )
                   .withColumn("most_popular_stay_type",
                     when(greatestAmongTheCounts === $"short_stay_cnt", "Short Stay")
@@ -124,12 +159,13 @@ object App {
                               .format("avro")
                               .schema(StructType(getExpediaInputSchema))
                               .load("/201 HW Dataset/expedia")
-                              .withColumn(durationOfStay, expr("(day(CAST(srch_co AS DATE))) - (day(CAST(srch_ci AS DATE)))"))
+                              .withColumn(durationOfStay, expr("DATEDIFF((CAST(srch_co AS DATE)), (CAST(srch_ci AS DATE)))"))
                               .withColumn("key", concat(col("hotel_id"),
                                 lit("/"),
                                 col("srch_ci")))
                               .where("year(CAST(srch_ci AS DATE)) == " + secondYear)
 
+    //joining with expedia for 2017
     val joinResult2017 = expedia2017Stream.as("exp")
                                       .join(hotelDailyKafka.as("hotelDaily"),
                                         $"hotelDaily.key" === $"exp.key"
@@ -137,75 +173,38 @@ object App {
                                       .select("exp.*", "hotelDaily.avg_tmpr_c")
 
 
-    val result2017 = joinResult2017
-                      .withColumn("batch_timestamp", current_timestamp())
-                      .withWatermark("batch_timestamp", "0 seconds")
-                      .groupBy("hotel_id", "batch_timestamp")
-                        .agg(
-                          count(when(erroneousCondition, true)).as("erroneous_data_cnt"),
-                          count(when(shortStayCond, true)).as("short_stay_cnt"),
-                          count(when(standardStayCond, true)).as("standard_stay_cnt"),
-                          count(when(standardExtendedStayCond, true)).as("standard_extended_stay_cnt"),
-                          count(when(longStayCond, true)).as("long_stay_cnt")
-                        )
-                        .withColumn("most_popular_stay_type",
-                          when(greatestAmongTheCounts === $"short_stay_cnt", "Short Stay")
-                            .when(greatestAmongTheCounts === $"standard_stay_cnt", "Standard Stay")
-                            .when(greatestAmongTheCounts === $"standard_extended_stay_cnt", "Standard Extended Stay")
-                            .when(greatestAmongTheCounts === $"long_stay_cnt", "Long Stay")
-                            .otherwise("Erroneous")
-                        )
+    //final result join between 2017 and 2016
+    val query = joinResult2017.as("r2017")
+                .join(broadcast(result2016).as("r2016"),
+//                  Seq("hotel_id"), "left"
+                  Seq("hotel_id")
+                  )
+                .groupByKey(row => row.getAs[Long](0))
+                .mapGroupsWithState(GroupStateTimeout.ProcessingTimeTimeout)(updateFunction)
+//                .withWatermark("batch_timestamp", "2 seconds")
+                .writeStream
+                .outputMode("update")
+                .format("console")
+                .start()
 
-    //TODO Main idea
-    // Union between streaming and batch DataFrames/Datasets is not supported;
+    query.awaitTermination()
 
-    result2017
-        .union(broadcast(result2016))
-        .writeStream
-        .outputMode("append")
-        .format("console")
-        .start()
+  }
 
-//    result2017.join(broadcast(result2016),
-//      $""
-//    ).groupByKey(row => row.get(0).asInstanceOf[String])
-//      .mapGroupsWithState(GroupStateTimeout.NoTimeout())(updateAcrossEvents)
-
-
-//    val query = hotelDailyKakfa
-//                            .writeStream
-//                            .outputMode("append")
-//                            .format("console")
-//                            .option("truncate", value = false)
-//                            .start()
-
-//    val query = joinResult
-//              .writeStream
-//              .outputMode("append")
-//              .format("console")
-//              .start()
-
-//    query.awaitTermination()
-
-//    def updateAcrossEvents(user:String,
-//                           inputs: Iterator[InputRow],
-//                           oldState: GroupState[UserState]):UserState = {
-//      var state:UserState = if (oldState.exists) oldState.get else UserState(user,
-//        "",
-//        new java.sql.Timestamp(6284160000000L),
-//        new java.sql.Timestamp(6284160L)
-//      )
-//      // we simply specify an old date that we can compare against and
-//      // immediately update based on the values in our data
-//
-//      for (input <- inputs) {
-//        state = updateUserStateWithEvent(state, input)
-//        oldState.update(state)
-//      }
-//      state
-//    }
-
-
+  /**
+   * Defines visit type based on stay duration
+   */
+  private def defineVisitType(optStayDuration: Option[Int]): VisitType.Value ={
+    if (optStayDuration.isEmpty || optStayDuration.get > 30 || optStayDuration.get < 0)
+      VisitType.erroneous
+    else if (optStayDuration.get == 1)
+      VisitType.short_stay
+    else if (optStayDuration.get < 7 && optStayDuration.get > 2)
+      VisitType.standard_stay
+    else if (optStayDuration.get < 14 && optStayDuration.get > 8)
+      VisitType.standard_extended_stay
+    else
+      VisitType.long_stay
   }
 
   private def getExpediaInputSchema = {
