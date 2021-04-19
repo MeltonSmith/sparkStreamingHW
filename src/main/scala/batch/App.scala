@@ -1,15 +1,12 @@
 package batch
 
+import model.VisitType.defineVisitType
 import model.{HotelState, VisitType}
-import org.apache.hadoop.fs.StorageType
-import org.apache.spark.network.protocol.Encoders
-import org.apache.spark.sql.{Column, Encoders, Row, SparkSession}
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.streaming.{GroupState, GroupStateTimeout, Trigger}
 import org.apache.spark.sql.types._
+import org.apache.spark.sql.{Column, Row, SparkSession}
 import org.apache.spark.storage.StorageLevel
-
-import java.sql.Timestamp
 
 /**
  *
@@ -65,29 +62,29 @@ object App {
     val state: HotelState =
       if (oldState.exists) oldState.get
       else {
-        val row = inputs.next()
+          //in case of left join the following fields may be nulls
+          val row = inputs.next()
+          val err_cnt = Option(row.get(7)).getOrElse(0).asInstanceOf[Int]
+          val short_cnt = Option(row.get(8)).getOrElse(0).asInstanceOf[Int]
+          val standard_cnt = Option(row.get(9)).getOrElse(0).asInstanceOf[Int]
+          val standard_ex_cnt = Option(row.get(10)).getOrElse(0).asInstanceOf[Int]
+          val long_stay_cnt = Option(row.get(11)).getOrElse(0).asInstanceOf[Int]
+          val stayType = VisitType.withName(Option(row.getAs[String](12)).getOrElse("Erroneous"))
 
-        //in case of left join they may be nulls
-        val err_cnt = Option(row.get(7)).getOrElse(0).asInstanceOf[Int]
-        val short_cnt = Option(row.get(8)).getOrElse(0).asInstanceOf[Int]
-        val standard_cnt = Option(row.get(9)).getOrElse(0).asInstanceOf[Int]
-        val standard_ex_cnt = Option(row.get(10)).getOrElse(0).asInstanceOf[Int]
-        val long_stay_cnt = Option(row.get(11)).getOrElse(0).asInstanceOf[Int]
-        val stayTypeString = Option(row.getAs[String](12)).getOrElse("Erroneous")
-        val stayType = VisitType.withName(stayTypeString)
+          val timeStamp = row.getTimestamp(13) //can't be null as we specified it explicitly
 
-        val justCreatedState = HotelState(hotel_id, new Timestamp(System.currentTimeMillis()), err_cnt, short_cnt, standard_cnt, standard_ex_cnt, long_stay_cnt, stayType)
-        val duration = Option(row.get(4)).orNull
-        val visitType = defineVisitType(duration)
-        justCreatedState.updateState(visitType)
+          val justCreatedState = HotelState(hotel_id, timeStamp, err_cnt, short_cnt, standard_cnt, standard_ex_cnt, long_stay_cnt, stayType)
+          val duration = Option(row.get(4)).getOrElse(-1).asInstanceOf[Int]
+          val visitType = defineVisitType(duration)
+          justCreatedState.updateState(visitType)
       }
 
     for (input <- inputs) {
-      val duration = Option(input.getInt(4))
+      val duration = Option(input.get(4)).getOrElse(-1).asInstanceOf[Int]
       val visitType = defineVisitType(duration)
       state.updateState(visitType)
     }
-    oldState.setTimeoutDuration(10000)
+    oldState.setTimeoutTimestamp(state.batch_timestamp.getTime + 2000)
     state
   }
 
@@ -173,38 +170,23 @@ object App {
                                       .select("exp.*", "hotelDaily.avg_tmpr_c")
 
 
-    //final result join between 2017 and 2016
+    //final result - join between 2017 and 2016
     val query = joinResult2017.as("r2017")
                 .join(broadcast(result2016).as("r2016"),
-//                  Seq("hotel_id"), "left"
-                  Seq("hotel_id")
+                  Seq("hotel_id"),
+                  "left_outer"
                   )
+                .withColumn("batch_timestamp", current_timestamp())
+                .withWatermark("batch_timestamp", "0 milliseconds")
                 .groupByKey(row => row.getAs[Long](0))
-                .mapGroupsWithState(GroupStateTimeout.ProcessingTimeTimeout)(updateFunction)
-//                .withWatermark("batch_timestamp", "2 seconds")
+                .mapGroupsWithState(GroupStateTimeout.EventTimeTimeout())(updateFunction)
                 .writeStream
+                .trigger(Trigger.ProcessingTime("5 seconds"))
                 .outputMode("update")
                 .format("console")
                 .start()
 
     query.awaitTermination()
-
-  }
-
-  /**
-   * Defines visit type based on stay duration
-   */
-  private def defineVisitType(optStayDuration: Option[Int]): VisitType.Value ={
-    if (optStayDuration.isEmpty || optStayDuration.get > 30 || optStayDuration.get < 0)
-      VisitType.erroneous
-    else if (optStayDuration.get == 1)
-      VisitType.short_stay
-    else if (optStayDuration.get < 7 && optStayDuration.get > 2)
-      VisitType.standard_stay
-    else if (optStayDuration.get < 14 && optStayDuration.get > 8)
-      VisitType.standard_extended_stay
-    else
-      VisitType.long_stay
   }
 
   private def getExpediaInputSchema = {
@@ -226,5 +208,4 @@ object App {
       StructField("day", StringType, nullable = false),
     )
   }
-
 }
