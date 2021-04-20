@@ -1,10 +1,5 @@
 package model
 
-import batch.App.{batchTimeStampColumnNumber, erroneousDataColumnNumber, longStayDataColumnNumber, shortStayColumnNumber, standardDataColumnNumber, standardExDataColumnNumber, stayTypeColumnNumber}
-import model.VisitType.{defineVisitType, erroneousStr}
-import org.apache.spark.sql.Row
-import org.apache.spark.sql.streaming.GroupState
-
 /**
  * Created by: Ian_Rakhmatullin
  * Date: 19.04.2021
