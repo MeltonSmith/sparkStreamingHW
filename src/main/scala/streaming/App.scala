@@ -5,7 +5,7 @@ import model.{GroupingKey, HotelState, VisitType}
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.streaming.{GroupState, GroupStateTimeout}
 import org.apache.spark.sql.types._
-import org.apache.spark.sql.{Column, Dataset, Row, SparkSession}
+import org.apache.spark.sql.{Column, DataFrame, Dataset, Row, SparkSession}
 import org.apache.spark.storage.StorageLevel
 
 /**
@@ -99,18 +99,13 @@ object App {
     spark.sparkContext.setLogLevel("ERROR")
 
     ///2016 as a static batch///
-    val expedia2016 = spark.read
+    val expediaStatic = spark.read
                       .format("avro")
                       .schema(StructType(getExpediaInputSchema))
                       .load("/201 HW Dataset/expedia")
-                      .withColumn(withChildren,
-                                    when(col("srch_children_cnt").gt(0), true)
-                                    .otherwise(false))
-                      .withColumn(durationOfStay, expr("DATEDIFF((CAST(srch_co AS DATE)), (CAST(srch_ci AS DATE)))"))
-                      .withColumn("key", concat(col(hotel_id),
-                          lit("/"),
-                          col("srch_ci")))
-                      .where("year(CAST(srch_ci AS DATE)) == " + firstYear)
+
+
+    val expedia2016 = filterStaticExpedia(expediaStatic)
 
     val hotelDailyKafka = spark
                           .read
@@ -170,23 +165,35 @@ object App {
   }
 
 
+  def filterStaticExpedia(expediaStatic: DataFrame) = {
+    expediaStatic
+            .withColumn(withChildren,
+              when(col("srch_children_cnt").gt(0), true)
+                .otherwise(false))
+            .withColumn(durationOfStay, expr("DATEDIFF((CAST(srch_co AS DATE)), (CAST(srch_ci AS DATE)))"))
+            .withColumn("key", concat(col(hotel_id),
+              lit("/"),
+              col("srch_ci")))
+            .where("year(CAST(srch_ci AS DATE)) == " + firstYear)
+  }
+
   /**
    *
    * @param expedia2016 expedia data for 2016
    * @param hotelDailyKafka hotel daily weather data from kafka
    * @return aggregated data per task logic, namely:
    *
-   * Read Expedia data for 2016 year from HDFS on WSL2 and enrich it with weather: add average temperature at checkin (join with hotels+weaher data from Kafka topic).
-    Filter incoming data by having average temperature more than 0 Celsius degrees.
-    Calculate customer's duration of stay as days between requested check-in and check-out date.
-    Create customer preferences of stay time based on next logic.
-        Map each hotel with multi-dimensional state consisting of record counts for each type of stay:
-            "Erroneous data": null, more than month(30 days), less than or equal to 0
-            "Short stay": 1 day stay
-            "Standard stay": 2-7 days
-            "Standard extended stay": 1-2 weeks
-            "Long stay": 2-4 weeks (less than month)
-        Add most_popular_stay_type for a hotel (with max count)
+   *         Read Expedia data for 2016 year from HDFS on WSL2 and enrich it with weather: add average temperature at checkin (join with hotels+weaher data from Kafka topic).
+   *         Filter incoming data by having average temperature more than 0 Celsius degrees.
+   *         Calculate customer's duration of stay as days between requested check-in and check-out date.
+   *         Create customer preferences of stay time based on next logic.
+   *         Map each hotel with multi-dimensional state consisting of record counts for each type of stay:
+   *         "Erroneous data": null, more than month(30 days), less than or equal to 0
+   *         "Short stay": 1 day stay
+   *         "Standard stay": 2-7 days
+   *         "Standard extended stay": 1-2 weeks
+   *         "Long stay": 2-4 weeks (less than month)
+   *         Add most_popular_stay_type for a hotel (with max count)
    *
    */
   def getAggregatedResultFor2016(expedia2016: Dataset[Row], hotelDailyKafka: Dataset[Row])(implicit spark : SparkSession): Dataset[Row] ={
@@ -271,17 +278,17 @@ object App {
    * Util
    * @return extracted visit type from a row
    */
-  private def getVisitTypeFromRow(row: Row) = {
+  def getVisitTypeFromRow(row: Row) = {
     val duration = Option(row.get(2)).getOrElse(-1).asInstanceOf[Int]
     defineVisitType(duration)
   }
 
-  private def getExpediaInputSchema = {
+  def getExpediaInputSchema = {
     List(
-      StructField("id", LongType),
+//      StructField("id", LongType),
       StructField("srch_ci", StringType),
-      StructField("srch_children_cnt", IntegerType),
       StructField("srch_co", StringType),
+      StructField("srch_children_cnt", IntegerType),
       StructField(hotel_id, LongType),
     )
   }
