@@ -1,12 +1,17 @@
 package model
 
+import batch.App.{batchTimeStampColumnNumber, erroneousDataColumnNumber, longStayDataColumnNumber, shortStayColumnNumber, standardDataColumnNumber, standardExDataColumnNumber, stayTypeColumnNumber}
+import model.VisitType.{defineVisitType, erroneousStr}
+import org.apache.spark.sql.Row
+import org.apache.spark.sql.streaming.GroupState
+
 /**
  * Created by: Ian_Rakhmatullin
  * Date: 19.04.2021
  *  Hotel state which will look like: hotel, with_children, batch_timestamp, erroneous_data_cnt, short_stay_cnt, standard_stay_cnt,
  *  standard_extended_stay_cnt, long_stay_cnt, most_popular_stay_type
  */
-case class HotelState(hotel_id:Long, batch_timestamp:java.sql.Timestamp, var erroneous_data_cnt:Int,
+case class HotelState(hotel_id:Long, withChildren: Boolean,batch_timestamp:java.sql.Timestamp, var erroneous_data_cnt:Int,
                  var short_stay_cnt:Int, var standard_stay_cnt:Int, var standard_extended_stay_cnt:Int, var long_stay_cnt: Int,
                  var most_popular_stay_type:VisitType.Value) {
 

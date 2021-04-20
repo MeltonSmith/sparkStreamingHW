@@ -3,13 +3,31 @@ package model
 /**
  * Created by: Ian_Rakhmatullin
  * Date: 19.04.2021
+ *
+ * Visit types for hotels.
+ *
+ * Defined by stay duration.
+ * These are:
+ * Erroneous data": null, more than month(30 days), less than or equal to 0
+ * "Short stay": 1 day stay
+ * "Standard stay": 2-7 days
+ * "Standard extended stay": 1-2 weeks
+ * "Long stay": 2-4 weeks (less than month)
  */
 object VisitType extends Enumeration {
-  val erroneous: VisitType.Value = Value("Erroneous")
-  val short_stay: VisitType.Value = Value("Short Stay")
-  val standard_stay: VisitType.Value = Value("Standard Stay")
-  val standard_extended_stay: VisitType.Value = Value("Standard Extended Stay")
-  val long_stay: VisitType.Value = Value("Long Stay")
+  //const
+  val erroneousStr = "Erroneous"
+  val shortStayStr = "Short Stay"
+  val standardStr = "Standard Stay"
+  val standardExStr = "Standard Extended Stay"
+  val longStr = "Long Stay"
+
+
+  val erroneous: VisitType.Value = Value(erroneousStr)
+  val short_stay: VisitType.Value = Value(shortStayStr)
+  val standard_stay: VisitType.Value = Value(standardStr)
+  val standard_extended_stay: VisitType.Value = Value(standardExStr)
+  val long_stay: VisitType.Value = Value(longStr)
 
   /**
    * Defines the visit type based on stay duration
