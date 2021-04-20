@@ -5,32 +5,12 @@ import model.{GroupingKey, HotelState, VisitType}
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.streaming.{GroupState, GroupStateTimeout}
 import org.apache.spark.sql.types._
-import org.apache.spark.sql.{Column, Row, SparkSession}
+import org.apache.spark.sql.{Column, Dataset, Row, SparkSession}
 import org.apache.spark.storage.StorageLevel
 
 /**
  *
- * Perform Spark stateful streaming application. Use Spark Structured Streaming OR DStreams approach.
-
-Note: In case of Spark Structure Streaming you can broadcast initial state map due to relatively small data size.
-
-    Install and start Spark in WSL2. Use "Spark WSL2 Setup" guide for this. Or reuse Spark deployment from previous task.
-    Read Expedia data for 2016 year from HDFS on WSL2 and enrich it with weather: add average temperature at checkin (join with hotels+weaher data from Kafka topic).
-    Filter incoming data by having average temperature more than 0 Celsius degrees.
-    Calculate customer's duration of stay as days between requested check-in and check-out date.
-    Create customer preferences of stay time based on next logic.
-        Map each hotel with multi-dimensional state consisting of record counts for each type of stay:
-            "Erroneous data": null, more than month(30 days), less than or equal to 0
-            "Short stay": 1 day stay
-            "Standard stay": 2-7 days
-            "Standard extended stay": 1-2 weeks
-            "Long stay": 2-4 weeks (less than month)
-        Add most_popular_stay_type for a hotel (with max count)
-    Store it as initial state (For examples: hotel, batch_timestamp, erroneous_data_cnt, short_stay_cnt, standard_stay_cnt, standard_extended_stay_cnt, long_stay_cnt, most_popular_stay_type).
-    In streaming way read Expedia data for 2017 year from HDFS on WSL2. Read initial state, send it via broadcast into streaming. Repeat previous logic on the stream.
-    Apply additional variance with filter on children presence in booking (with_children: false - children <= 0; true - children > 0).
-    Store final data in HDFS. (Result will look like: hotel, with_children, batch_timestamp, erroneous_data_cnt, short_stay_cnt, standart_stay_cnt, standart_extended_stay_cnt, long_stay_cnt, most_popular_stay_type
-
+ * Spark streaming HW.
  *
  * Created by: Ian_Rakhmatullin
  * Date: 11.04.2021
@@ -111,15 +91,12 @@ object App {
 
 
   def main(args : Array[String]) {
-    val spark = SparkSession
+    implicit val spark: SparkSession = SparkSession
                     .builder
                     .appName("sparkStreamingHW2")
                     .getOrCreate()
 
     spark.sparkContext.setLogLevel("ERROR")
-
-    import spark.implicits._
-
 
     ///2016 as a static batch///
     val expedia2016 = spark.read
@@ -152,31 +129,8 @@ object App {
 
     hotelDailyKafka.persist(StorageLevel.MEMORY_ONLY)
 
-    //enriching with weather
-    val joinResult = expedia2016.as("exp")
-            .join(hotelDailyKafka.as("hotelDaily"),
-              $"hotelDaily.key" === $"exp.key"
-            )
-            .select("exp.*", "hotelDaily.avg_tmpr_c")
 
-
-
-    val result2016 = joinResult
-                  .groupBy(hotel_id, withChildren)
-                  .agg(
-                    count(when(erroneousCondition, true)).cast(IntegerType).as(erroneous_data_cnt),
-                    count(when(shortStayCond, true)).cast(IntegerType).as(short_stay_cnt),
-                    count(when(standardStayCond, true)).cast(IntegerType).as(standard_stay_cnt),
-                    count(when(standardExtendedStayCond, true)).cast(IntegerType).as(standard_extended_stay_cnt),
-                    count(when(longStayCond, true)).cast(IntegerType).as(long_stay_cnt)
-                  )
-                  .withColumn(most_popular_stay_type,
-                    when(greatestAmongTheCounts === short_stay_cnt, shortStayStr)
-                      .when(greatestAmongTheCounts === standard_stay_cnt, standardStr)
-                      .when(greatestAmongTheCounts === standard_extended_stay_cnt, standardExStr)
-                      .when(greatestAmongTheCounts === long_stay_cnt, longStr)
-                      .otherwise(erroneousStr)
-                  )
+    val result2016 = getAggregatedResultFor2016(expedia2016, hotelDailyKafka)
 
 
     ////2017/////
@@ -193,55 +147,117 @@ object App {
                                 col("srch_ci")))
                               .where("year(CAST(srch_ci AS DATE)) == " + secondYear)
 
-    //joining with expedia for 2017
-    val joinResult2017 = expedia2017Stream.as("exp")
-                                      .join(hotelDailyKafka.as("hotelDaily"),
-                                        $"hotelDaily.key" === $"exp.key"
-                                      )
-                                      .select("exp.*", "hotelDaily.avg_tmpr_c")
+    val finalResult = getFinalResultDS(expedia2017Stream, hotelDailyKafka, result2016)
 
-
-    //final result - join between 2017 and static broadcast 2016
-    val query = joinResult2017.as("r2017")
-                .join(broadcast(result2016).as("r2016"),
-                  Seq(hotel_id, withChildren),
-                  "left_outer"
-                  )
-                .withColumn("batch_timestamp", current_timestamp())
-                .withWatermark("batch_timestamp", "0 milliseconds")
-                .select("r2017." + hotel_id,
-                  "r2017."+ withChildren,
-                  "r2017." + durationOfStay,
-                  "r2016." + erroneous_data_cnt,
-                  "r2016." + short_stay_cnt,
-                  "r2016." + standard_stay_cnt,
-                  "r2016." + standard_extended_stay_cnt,
-                  "r2016." + long_stay_cnt,
-                  "r2016." + most_popular_stay_type,
-                  "batch_timestamp")
-                .groupByKey(row => GroupingKey(row.getAs[Long](0), row.getAs[Boolean](1)))
-                .mapGroupsWithState(GroupStateTimeout.EventTimeTimeout())(updateFunction)
-//                .writeStream
-//                .outputMode("update")
-//                .foreachBatch((batchDF: Dataset[HotelState], batchId: Long) =>
-//                  if (!batchDF.isEmpty){
-//                    batchDF
-//                      .repartition(1) //due to small amount of the data
-//                      .write
-//                      .format("parquet")
-//                      .save(s"/201 HW Dataset/finalResult/$batchId")
-//                  }
-//                )
-//                .start()
-
-                              .writeStream
-                              .format("console")
-                              .outputMode("update")
-                              .start()
+    val query = finalResult.writeStream
+      //                .writeStream
+      //                .outputMode("update")
+      //                .foreachBatch((batchDF: Dataset[HotelState], batchId: Long) =>
+      //                  if (!batchDF.isEmpty){
+      //                    batchDF
+      //                      .repartition(1) //due to small amount of the data
+      //                      .write
+      //                      .format("parquet")
+      //                      .save(s"/201 HW Dataset/finalResult/$batchId")
+      //                  }
+      //                )
+      //                .start()
+                        .format("console")
+                        .outputMode("update")
+                        .start()
 
     query.awaitTermination()
   }
 
+
+  /**
+   *
+   * @param expedia2016 expedia data for 2016
+   * @param hotelDailyKafka hotel daily weather data from kafka
+   * @return aggregated data per task logic, namely:
+   *
+   * Read Expedia data for 2016 year from HDFS on WSL2 and enrich it with weather: add average temperature at checkin (join with hotels+weaher data from Kafka topic).
+    Filter incoming data by having average temperature more than 0 Celsius degrees.
+    Calculate customer's duration of stay as days between requested check-in and check-out date.
+    Create customer preferences of stay time based on next logic.
+        Map each hotel with multi-dimensional state consisting of record counts for each type of stay:
+            "Erroneous data": null, more than month(30 days), less than or equal to 0
+            "Short stay": 1 day stay
+            "Standard stay": 2-7 days
+            "Standard extended stay": 1-2 weeks
+            "Long stay": 2-4 weeks (less than month)
+        Add most_popular_stay_type for a hotel (with max count)
+   *
+   */
+  def getAggregatedResultFor2016(expedia2016: Dataset[Row], hotelDailyKafka: Dataset[Row])(implicit spark : SparkSession): Dataset[Row] ={
+    import spark.implicits._
+
+    val joinResult = expedia2016.as("exp")
+      .join(hotelDailyKafka.as("hotelDaily"),
+        $"hotelDaily.key" === $"exp.key"
+      )
+      .select("exp.*", "hotelDaily.avg_tmpr_c")
+
+    val result2016 = joinResult
+      .groupBy(hotel_id, withChildren)
+      .agg(
+        count(when(erroneousCondition, true)).cast(IntegerType).as(erroneous_data_cnt),
+        count(when(shortStayCond, true)).cast(IntegerType).as(short_stay_cnt),
+        count(when(standardStayCond, true)).cast(IntegerType).as(standard_stay_cnt),
+        count(when(standardExtendedStayCond, true)).cast(IntegerType).as(standard_extended_stay_cnt),
+        count(when(longStayCond, true)).cast(IntegerType).as(long_stay_cnt)
+      )
+      .withColumn(most_popular_stay_type,
+        when(greatestAmongTheCounts === short_stay_cnt, shortStayStr)
+          .when(greatestAmongTheCounts === standard_stay_cnt, standardStr)
+          .when(greatestAmongTheCounts === standard_extended_stay_cnt, standardExStr)
+          .when(greatestAmongTheCounts === long_stay_cnt, longStr)
+          .otherwise(erroneousStr)
+      )
+
+    result2016
+  }
+
+  /**
+   * Performs broadcast left outer join with 2016 (as a initial state) by hotel_id + children presence flag.
+   * Repeats the logic of getAggregatedResultFor2016 on the stream
+   * @param expedia2017 expedia for 2017 year as a stream
+   * @param hotelDailyKafka hotel daily weather data from kafka topic
+   * @param result2016 result of the data aggregation for 2016
+   * @return final result which looks like:
+   *         hotel_id, with_children, batch_timestamp, erroneous_data_cnt, short_stay_cnt, standart_stay_cnt, standart_extended_stay_cnt, long_stay_cnt, most_popular_stay_type
+   */
+  def getFinalResultDS(expedia2017: Dataset[Row], hotelDailyKafka: Dataset[Row], result2016: Dataset[Row])(implicit spark: SparkSession): Dataset[HotelState] ={
+    import spark.implicits._
+
+    val joinResult2017 = expedia2017.as("exp")
+                                  .join(hotelDailyKafka.as("hotelDaily"),
+                                    "key"
+                                  )
+                                  .select("exp.*", "hotelDaily.avg_tmpr_c")
+
+    val finalResult = joinResult2017.as("r2017")
+      .join(broadcast(result2016).as("r2016"),
+        Seq(hotel_id, withChildren),
+        "left_outer"
+      )
+      .withColumn("batch_timestamp", current_timestamp())
+      .withWatermark("batch_timestamp", "0 milliseconds")
+      .select("r2017." + hotel_id,
+        "r2017."+ withChildren,
+        "r2017." + durationOfStay,
+        "r2016." + erroneous_data_cnt,
+        "r2016." + short_stay_cnt,
+        "r2016." + standard_stay_cnt,
+        "r2016." + standard_extended_stay_cnt,
+        "r2016." + long_stay_cnt,
+        "r2016." + most_popular_stay_type,
+        "batch_timestamp")
+      .groupByKey(row => GroupingKey(row.getAs[Long](0), row.getAs[Boolean](1)))
+      .mapGroupsWithState(GroupStateTimeout.EventTimeTimeout())(updateFunction)
+
+    finalResult
+  }
 
   /**
    * Util
