@@ -1,4 +1,4 @@
-package year2016Test
+package year2016Tests
 
 import com.github.mrpowers.spark.fast.tests.DatasetComparer
 import org.apache.spark.sql.types.{BooleanType, IntegerType, LongType, StringType, StructField, StructType}
@@ -12,9 +12,9 @@ import streaming.App.getExpediaInputSchema
  * Created by: Ian_Rakhmatullin
  * Date: 20.04.2021
  */
-class year2016AggregationTest extends FunSpec with SparkSessionTestWrapper with DatasetComparer{
+class Year2016AggregationTest extends FunSpec with SparkSessionTestWrapper with DatasetComparer{
 
-  it("should filter") {
+  it("should filter all except 2016") {
     // srch_ci, srch_co, children_cnt, hotel_id
     val expediaRaw = Seq(
       //hotel 1
@@ -27,6 +27,7 @@ class year2016AggregationTest extends FunSpec with SparkSessionTestWrapper with 
       Row("2017-11-12", "2016-08-20", 1, 111111112L)
     )
 
+    // srch_ci, srch_co, children_cnt, hotel_id, withChildren, durationOfStay, key
     val expediaExpectedSeq = Seq(
       //hotel 1
       Row("2016-08-04", "2016-08-05", 0, 111111111L, false, 1, "111111111/2016-08-04"),
@@ -36,16 +37,14 @@ class year2016AggregationTest extends FunSpec with SparkSessionTestWrapper with 
       Row("2016-10-06", "2016-08-20", 1, 111111112L, true, -47, "111111112/2016-10-06")
     )
 
-
     val expediaRawDS = createDF(expediaRaw, getExpediaInputSchema)
     val expediaExpectedDS = createDF(expediaExpectedSeq, getExpediaOutputSchema)
-
 
     val result = App.filterStaticExpedia(expediaRawDS)
 
     assertSmallDatasetEquality(result, expediaExpectedDS, ignoreNullable = true)
 
-    info("should contain all the records test is passed")
+    info("result DS for expedia 2016 contains all needed columns and omits the records for other years but 2016")
   }
 
   private def createDF(seq: Seq[Row], schema: Seq[StructField]) = {
