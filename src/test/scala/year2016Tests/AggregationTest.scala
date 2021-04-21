@@ -4,6 +4,7 @@ import com.github.mrpowers.spark.fast.tests.DatasetComparer
 import model.VisitType
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.types.{BooleanType, IntegerType, LongType, StringType, StructField}
+import org.joda.time.DateTime
 import org.scalatest.FunSpec
 import sessionWrapper.SparkSessionTestWrapper
 import streaming.App
@@ -15,41 +16,62 @@ import testUtils.TestUtils.{getTestExpediaAggregationInputSchema, getTestExpedia
  * Date: 21.04.2021
  */
 class AggregationTest extends FunSpec with SparkSessionTestWrapper with DatasetComparer{
+  val firstHotelId = 111111111L
+  val secondHotelId = 111111112L
 
-  it("should aggregate properly") {
+  val date1 = "2016-08-04"
+  val date2 = "2016-08-05"
+  val date3 = "2016-08-10"
+  val date4 = "2016-10-06"
+  val date5 = "2016-10-07"
+  val date6 = "2016-04-12"
+  val date7 = "2016-04-13"
+
+  it("should join and aggregate properly") {
+
     // srch_ci, srch_co, children_cnt, hotel_id, withChildren, durationOfStay, key
     val filteredExpedia = Seq(
       //for hotel 1
-      Row("2016-08-04", "2016-08-05", 0, 111111111L, false, 1, "111111111/2016-08-04"),
-      Row("2016-08-04", "2016-08-10", 0, 111111111L, false, 6,"111111111/2016-08-04"),
+      createExpediaRowForJoin(date1, 1, firstHotelId, 0),
+      createExpediaRowForJoin(date1, 6, firstHotelId, 0),
+      createExpediaRowForJoin(date2, 10, firstHotelId, 0),
+      createExpediaRowForJoin(date3, 11, firstHotelId, 0),
 
-      //for hotel 2
-      Row("2016-10-06", "2016-08-20", 1, 111111112L, true, -47, "111111112/2016-10-06"),
-      Row("2016-10-06", "2016-10-21", 1, 111111112L, true, 15, "111111112/2016-10-06"),
-      Row("2016-10-06", "2016-10-22", 1, 111111112L, true, 16, "111111112/2016-10-06"),
-      Row("2016-10-06", "2016-10-23", 1, 111111112L, true, 17, "111111112/2016-10-06"),
-      Row("2016-10-06", "2016-10-10", 1, 111111112L, true, 4, "111111112/2016-10-06")
+      //for hotel 2 with children
+      createExpediaRowForJoin(date4, -47, secondHotelId, 1),
+      createExpediaRowForJoin(date4, 15, secondHotelId, 20),
+      createExpediaRowForJoin(date4, 16, secondHotelId, 42),
+      createExpediaRowForJoin(date4, 17, secondHotelId, 13),
+      createExpediaRowForJoin(date4, 4, secondHotelId, 1),
+        //without for hotel 2, but can be joint
+      createExpediaRowForJoin(date4, 1, secondHotelId, 0),
+      createExpediaRowForJoin(date5, 10, secondHotelId, 0),
+
+        //some non joint data for hotel2 (weather data was filtered somehow)
+      createExpediaRowForJoin(date6, 1, secondHotelId, 0),
+      createExpediaRowForJoin(date7, 2, secondHotelId, 0),
     )
-
 
     // id(hotel_id), whr_date, avg_tmpr_c, key
     val hotelDailyDataForJoin = Seq(
       //hotelDaily for hotel 1
-      Row(111111111L, "2016-08-05", 2.2, "111111111/2016-08-04"),
-      Row(111111111L, "2016-08-10", 34.2, "111111111/2016-08-10"),
+      createHotelDailyRow(firstHotelId, date1, 2.2),
+      createHotelDailyRow(firstHotelId, date2, 10.1),
+      createHotelDailyRow(firstHotelId, date3, 12.3),
 
       //hotelDaily for hotel 2
-      Row(111111112L, "2016-08-20", 1.02, "111111112/2016-10-06")
+      createHotelDailyRow(secondHotelId, date4, 1.02),
+      createHotelDailyRow(secondHotelId, date5, 0.5)
     )
 
-    //TODO ignore batch_timestamp
 //  hotel_id, with_children, erroneous_data_cnt, short_stay_cnt, standard_stay_cnt, standard_extended_stay_cnt, long_stay_cnt, most_popular_stay_type
     val aggregationResult = Seq(
       //aggregation result for hotel 1
-      Row(111111111L, false, 0, 1, 1, 0, 0, VisitType.shortStayStr),
+      Row(firstHotelId, false, 0, 1, 1, 2, 0, VisitType.standardExStr),
 
       //aggregation for hotel 2
-      Row(111111112L, true, 1, 0, 1, 0, 3, VisitType.longStayStr)
+      Row(secondHotelId, true, 1, 0, 1, 0, 3, VisitType.longStayStr),
+      Row(secondHotelId, false, 0, 1, 0, 1, 0, VisitType.shortStayStr)
     )
 
 
@@ -64,7 +86,18 @@ class AggregationTest extends FunSpec with SparkSessionTestWrapper with DatasetC
 
     assertSmallDatasetEquality(actualAggregationResult, expectedAggregationResultDs, ignoreNullable = true, orderedComparison = false)
 
-    info("result DS for expedia 2016 contains all needed columns and omits the records for other years but 2016")
+    info("result DS for aggregation of 2016 year is correct")
   }
 
+  private def createHotelDailyRow(hotel_id: Long, checkInDate: String, tmprC: Double) = {
+    Row(hotel_id, checkInDate, tmprC, hotel_id + "/" + checkInDate)
+  }
+
+  private def createExpediaRowForJoin(checkInDate: String, durationOfStay: Int, hotel_id: Long, childrenCount: Int) = {
+    val checkOutTimeStr = DateTime.parse(checkInDate)
+                        .plusDays(durationOfStay)
+                        .toString("yyyy-MM-dd")
+
+    Row(checkInDate, checkOutTimeStr, childrenCount, hotel_id, childrenCount > 0, durationOfStay, hotel_id + "/" + checkInDate)
+  }
 }
