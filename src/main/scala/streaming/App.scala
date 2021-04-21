@@ -7,6 +7,7 @@ import org.apache.spark.sql.streaming.{GroupState, GroupStateTimeout}
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.{Column, DataFrame, Dataset, Row, SparkSession}
 import org.apache.spark.storage.StorageLevel
+import utils.Schemas.{getExpediaInputSchema, getHotelDailyValueSchema}
 
 /**
  *
@@ -283,24 +284,5 @@ object App {
     defineVisitType(duration)
   }
 
-  def getExpediaInputSchema = {
-    List(
-//      StructField("id", LongType),
-      StructField("srch_ci", StringType),
-      StructField("srch_co", StringType),
-      StructField("srch_children_cnt", IntegerType),
-      StructField(hotel_id, LongType),
-    )
-  }
 
-  private def getHotelDailyValueSchema = {
-    List(
-      StructField("Id", LongType, nullable = false),
-      StructField("wthr_date", StringType, nullable = false),
-      StructField("avg_tmpr_c", DoubleType, nullable = true),
-      StructField("year", StringType, nullable = false),
-      StructField("month", StringType, nullable = false),
-      StructField("day", StringType, nullable = false),
-    )
-  }
 }
