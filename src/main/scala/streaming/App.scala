@@ -216,10 +216,10 @@ object App {
         count(when(longStayCond, true)).cast(IntegerType).as(long_stay_cnt)
       )
       .withColumn(most_popular_stay_type,
-        when(greatestAmongTheCounts === short_stay_cnt, shortStayStr)
-          .when(greatestAmongTheCounts === standard_stay_cnt, standardStr)
-          .when(greatestAmongTheCounts === standard_extended_stay_cnt, standardExStr)
-          .when(greatestAmongTheCounts === long_stay_cnt, longStr)
+        when(greatestAmongTheCounts === $"short_stay_cnt", shortStayStr)
+          .when(greatestAmongTheCounts === $"standard_stay_cnt", standardStr)
+          .when(greatestAmongTheCounts === $"standard_extended_stay_cnt", standardExStr)
+          .when(greatestAmongTheCounts === $"long_stay_cnt", longStayStr)
           .otherwise(erroneousStr)
       )
 

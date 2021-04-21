@@ -1,13 +1,14 @@
 package year2016Tests
 
 import com.github.mrpowers.spark.fast.tests.DatasetComparer
+import model.VisitType
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.types.{BooleanType, IntegerType, LongType, StringType, StructField}
 import org.scalatest.FunSpec
 import sessionWrapper.SparkSessionTestWrapper
 import streaming.App
 import testUtils.TestUtils
-import testUtils.TestUtils.{getTestExpediaAggregationInputSchema, getTestExpediaOutputSchema, getTestHotelDailyInputSchema}
+import testUtils.TestUtils.{getTestExpediaAggregationInputSchema, getTestExpediaOutputSchema, getTestHotelDailyInputSchema, getTestStaticAggregationOutputSchema}
 
 /**
  * Created by: Ian_Rakhmatullin
@@ -15,7 +16,7 @@ import testUtils.TestUtils.{getTestExpediaAggregationInputSchema, getTestExpedia
  */
 class AggregationTest extends FunSpec with SparkSessionTestWrapper with DatasetComparer{
 
-  it("should filter all except 2016") {
+  it("should aggregate properly") {
     // srch_ci, srch_co, children_cnt, hotel_id, withChildren, durationOfStay, key
     val filteredExpedia = Seq(
       //for hotel 1
@@ -23,7 +24,11 @@ class AggregationTest extends FunSpec with SparkSessionTestWrapper with DatasetC
       Row("2016-08-04", "2016-08-10", 0, 111111111L, false, 6,"111111111/2016-08-04"),
 
       //for hotel 2
-      Row("2016-10-06", "2016-08-20", 1, 111111112L, true, -47, "111111112/2016-10-06")
+      Row("2016-10-06", "2016-08-20", 1, 111111112L, true, -47, "111111112/2016-10-06"),
+      Row("2016-10-06", "2016-10-21", 1, 111111112L, true, 15, "111111112/2016-10-06"),
+      Row("2016-10-06", "2016-10-22", 1, 111111112L, true, 16, "111111112/2016-10-06"),
+      Row("2016-10-06", "2016-10-23", 1, 111111112L, true, 17, "111111112/2016-10-06"),
+      Row("2016-10-06", "2016-10-10", 1, 111111112L, true, 4, "111111112/2016-10-06")
     )
 
 
@@ -31,35 +36,33 @@ class AggregationTest extends FunSpec with SparkSessionTestWrapper with DatasetC
     val hotelDailyDataForJoin = Seq(
       //hotelDaily for hotel 1
       Row(111111111L, "2016-08-05", 2.2, "111111111/2016-08-04"),
-      Row(111111111L, "2016-08-10", 34.2, "111111111/2016-08-04"),
+      Row(111111111L, "2016-08-10", 34.2, "111111111/2016-08-10"),
 
       //hotelDaily for hotel 2
       Row(111111112L, "2016-08-20", 1.02, "111111112/2016-10-06")
     )
 
     //TODO ignore batch_timestamp
-//    hotel_id, with_children, batch_timestamp, erroneous_data_cnt, short_stay_cnt, standart_stay_cnt, standart_extended_stay_cnt, long_stay_cnt, most_popular_stay_type
-
+//  hotel_id, with_children, erroneous_data_cnt, short_stay_cnt, standard_stay_cnt, standard_extended_stay_cnt, long_stay_cnt, most_popular_stay_type
     val aggregationResult = Seq(
-      //hotelDaily for hotel 1
-      Row(111111111L, "2016-08-05", 2.2, "111111111/2016-08-04"),
-      Row(111111111L, "2016-08-10", 34.2, "111111111/2016-08-04"),
+      //aggregation result for hotel 1
+      Row(111111111L, false, 0, 1, 1, 0, 0, VisitType.shortStayStr),
 
-      //hotelDaily for hotel 2
-      Row(111111112L, "2016-08-20", 1.02, "111111112/2016-10-06")
+      //aggregation for hotel 2
+      Row(111111112L, true, 1, 0, 1, 0, 3, VisitType.longStayStr)
     )
 
 
     //input
     val expediaRawDS = TestUtils.createDF(spark, filteredExpedia, getTestExpediaAggregationInputSchema)
-    val expediaExpectedDS = TestUtils.createDF(spark, hotelDailyDataForJoin, getTestHotelDailyInputSchema)
+    val hotelDailyDS = TestUtils.createDF(spark, hotelDailyDataForJoin, getTestHotelDailyInputSchema)
+
+    val expectedAggregationResultDs = TestUtils.createDF(spark, aggregationResult, getTestStaticAggregationOutputSchema)
 
     //output
-//    val expediaExpectedDS = TestUtils.createDF(spark, expediaExpectedSeq, getTestExpediaOutputSchema)
+    val actualAggregationResult = App.getAggregatedResultFor2016(expediaRawDS, hotelDailyDS)(spark)
 
-//    val result = App.getAggregatedResultFor2016(expediaRawDS, )(spark)
-
-//    assertSmallDatasetEquality(result, expediaExpectedDS, ignoreNullable = true)
+    assertSmallDatasetEquality(actualAggregationResult, expectedAggregationResultDs, ignoreNullable = true, orderedComparison = false)
 
     info("result DS for expedia 2016 contains all needed columns and omits the records for other years but 2016")
   }

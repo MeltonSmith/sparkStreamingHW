@@ -20,14 +20,14 @@ object VisitType extends Enumeration {
   val shortStayStr = "Short Stay"
   val standardStr = "Standard Stay"
   val standardExStr = "Standard Extended Stay"
-  val longStr = "Long Stay"
+  val longStayStr = "Long Stay"
 
 
   val erroneous: VisitType.Value = Value(erroneousStr)
   val short_stay: VisitType.Value = Value(shortStayStr)
   val standard_stay: VisitType.Value = Value(standardStr)
   val standard_extended_stay: VisitType.Value = Value(standardExStr)
-  val long_stay: VisitType.Value = Value(longStr)
+  val long_stay: VisitType.Value = Value(longStayStr)
 
   /**
    * Defines the visit type based on stay duration

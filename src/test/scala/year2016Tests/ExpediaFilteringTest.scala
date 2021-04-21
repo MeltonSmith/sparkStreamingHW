@@ -36,7 +36,7 @@ class ExpediaFilteringTest extends FunSpec with SparkSessionTestWrapper with Dat
       Row("2016-08-04", "2016-08-10", 0, 111111111L, false, 6,"111111111/2016-08-04"),
 
       //for hotel 2
-      Row("2016-10-06", "2016-08-20", 1, 111111112L, true, -47, "111111112/2016-10-06")
+      Row("2016-10-06", "2016-08-20", 1, 111111112L, false, -47, "111111112/2016-10-06")
     )
 
     val expediaRawDS = TestUtils.createDF(spark, expediaRaw, Schemas.getExpediaInputSchema)
@@ -44,7 +44,7 @@ class ExpediaFilteringTest extends FunSpec with SparkSessionTestWrapper with Dat
 
     val result = App.filterStaticExpedia(expediaRawDS)
 
-    assertSmallDatasetEquality(result, expediaExpectedDS, ignoreNullable = true)
+    assertSmallDatasetEquality(result, expediaExpectedDS)
 
     info("result DS for expedia 2016 contains all needed columns and omits the records for other years but 2016")
   }
