@@ -24,7 +24,7 @@ object TestUtils {
     Row(hotel_id, checkInDate, tmprC, hotel_id + "/" + checkInDate)
   }
 
-  def createExpediaRowForJoin(checkInDate: String, durationOfStay: Int, hotel_id: Long, childrenCount: Int) = {
+  def createExpediaRowFiltered(checkInDate: String, durationOfStay: Int, hotel_id: Long, childrenCount: Int) = {
     val checkOutTimeStr = DateTime.parse(checkInDate)
       .plusDays(durationOfStay)
       .toString("yyyy-MM-dd")
@@ -32,7 +32,7 @@ object TestUtils {
     Row(checkInDate, checkOutTimeStr, childrenCount, hotel_id, childrenCount > 0, durationOfStay, hotel_id + "/" + checkInDate)
   }
 
-  def getTestExpediaOutputSchema: immutable.Seq[StructField] = {
+  def getTestExpediaFilteredSchema: immutable.Seq[StructField] = {
     List(
       StructField("srch_ci", StringType),
       StructField("srch_co", StringType),
@@ -67,6 +67,6 @@ object TestUtils {
   }
 
   def getTestExpediaAggregationInputSchema: immutable.Seq[StructField] = {
-    getTestExpediaOutputSchema
+    getTestExpediaFilteredSchema
   }
 }

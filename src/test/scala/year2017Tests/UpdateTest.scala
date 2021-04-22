@@ -1,26 +1,30 @@
 package year2017Tests
 
 import com.github.mrpowers.spark.fast.tests.DatasetComparer
-import model.VisitType
+import model.{HotelState, VisitType}
 import org.apache.spark.sql.catalyst.encoders.{ExpressionEncoder, RowEncoder}
-import org.apache.spark.sql.{Encoders, Row, SQLContext}
 import org.apache.spark.sql.execution.streaming.MemoryStream
-import org.apache.spark.sql.types.{IntegerType, StringType, StructField, StructType}
+import org.apache.spark.sql.types.StructType
+import org.apache.spark.sql.{Row, SQLContext}
+import org.joda.time.DateTime
 import org.scalatest.FunSpec
 import sessionWrapper.SparkSessionTestWrapper
 import streaming.App.getFinalResultDS
 import testUtils.TestUtils
-import testUtils.TestUtils.{createExpediaRowForJoin, createHotelDailyRow, getTestExpediaAggregationInputSchema, getTestExpediaOutputSchema, getTestHotelDailyInputSchema, getTestStaticAggregationOutputSchema}
+import testUtils.TestUtils._
+
+import java.sql.Timestamp
 
 /**
  * Created by: Ian_Rakhmatullin
  * Date: 21.04.2021
+ *
+ * Test for updating old data (previous year) with new data.
+ *
  */
 class UpdateTest extends FunSpec with SparkSessionTestWrapper with DatasetComparer{
   implicit val sqlCtx: SQLContext = spark.sqlContext
-
-
-
+  import spark.implicits._
 
   val firstHotelId = 111111111L
   val secondHotelId = 111111112L
@@ -33,35 +37,26 @@ class UpdateTest extends FunSpec with SparkSessionTestWrapper with DatasetCompar
   val date6 = "2017-07-12"
   val date7 = "2017-11-16"
 
+  it("should update 2016 with 2017 data properly") {
 
-
-
-  it("should join and aggregate properly") {
-
-    implicit val value: ExpressionEncoder[Row] = RowEncoder(StructType(getTestExpediaOutputSchema))
+    implicit val value: ExpressionEncoder[Row] = RowEncoder(StructType(getTestExpediaFilteredSchema))
     val events = MemoryStream[Row]
     val sessions = events.toDS
 
     val filteredExpediaFor2017 = Seq(
-      //for hotel 1
-//      createExpediaRowForJoin(date1, 1, firstHotelId, 0),
-//      createExpediaRowForJoin(date1, 6, firstHotelId, 0),
-      createExpediaRowForJoin(date2, 10, firstHotelId, 0),
-      createExpediaRowForJoin(date3, 11, firstHotelId, 0),
+      //for hotel 1 adding 2 standard extended
+      createExpediaRowFiltered(date2, 10, firstHotelId, 0),
+      createExpediaRowFiltered(date3, 11, firstHotelId, 0),
 
-      //for hotel 2 with children
-//      createExpediaRowForJoin(date4, -47, secondHotelId, 1),
-//      createExpediaRowForJoin(date4, 15, secondHotelId, 20),
-      createExpediaRowForJoin(date4, 10, secondHotelId, 42),
-      createExpediaRowForJoin(date4, 8, secondHotelId, 13),
-//      createExpediaRowForJoin(date4, 4, secondHotelId, 1),
-      //without children for hotel 2, but can be joint
-      createExpediaRowForJoin(date4, 1, secondHotelId, 0),
-//      createExpediaRowForJoin(date5, 10, secondHotelId, 0),
+      //for hotel 2 with children adding 2 standard extended
+      createExpediaRowFiltered(date4, 10, secondHotelId, 42),
+      createExpediaRowFiltered(date4, 8, secondHotelId, 13),
+      //without children for hotel 2, but can be joint. Adding 1 short stay
+      createExpediaRowFiltered(date4, 1, secondHotelId, 0),
 
       //some non joint data for hotel2 (weather data was filtered somehow)
-      createExpediaRowForJoin(date6, 1, secondHotelId, 0),
-      createExpediaRowForJoin(date7, 2, secondHotelId, 0),
+      createExpediaRowFiltered(date6, 1, secondHotelId, 0),
+      createExpediaRowFiltered(date7, 2, secondHotelId, 0),
     )
 
     val hotelDailyDataForJoin2017 = Seq(
@@ -85,13 +80,15 @@ class UpdateTest extends FunSpec with SparkSessionTestWrapper with DatasetCompar
 
     )
 
-    val updateResults = Seq(
+    val dummyTimestamp = new Timestamp(new DateTime().getMillis)
+
+    val updateResults2 = Seq(
       //aggregation results for hotel 1
-      Row(firstHotelId, false, 2, 3, 13, 14, 4, VisitType.standardExStr), //type should be changed
+      HotelState(firstHotelId, withChildren = false, dummyTimestamp, 2, 3, 13, 14, 4, VisitType.standard_extended_stay), //type should be changed
 
       //aggregation for hotel 2
-      Row(secondHotelId, true, 2, 3, 4, 17, 16, VisitType.standardExStr), //type should be changed
-      Row(secondHotelId, false, 0, 201, 199, 23, 54, VisitType.shortStayStr) //type stays as is
+      HotelState(secondHotelId, withChildren = true, dummyTimestamp, 2, 3, 4, 17, 16, VisitType.standard_extended_stay), //type should be changed
+      HotelState(secondHotelId, withChildren = false, dummyTimestamp, 0, 201, 199, 23, 54, VisitType.short_stay) //type stays as is
 
     )
 
@@ -102,7 +99,7 @@ class UpdateTest extends FunSpec with SparkSessionTestWrapper with DatasetCompar
                           .writeStream
                           .format("memory")
                           .queryName(queryName)
-                          .outputMode("complete")
+                          .outputMode("update")
                           .start
 
     streamingQuery.processAllAvailable()
@@ -112,21 +109,17 @@ class UpdateTest extends FunSpec with SparkSessionTestWrapper with DatasetCompar
     val aggregationResultsFor2016DS = TestUtils.createDF(spark, aggregationResultFor2016, getTestStaticAggregationOutputSchema)
 
     //output
-    //TODO make expected generified with hotelState
-    val updateExpectedResultsDS = TestUtils.createDF(spark, updateResults, getTestStaticAggregationOutputSchema)
+    val updateExpectedResultsDS = spark.createDataset(updateResults2)
     val actualResultOfUpdate = getFinalResultDS(expediaFor2017Streamed, hotelDailyDS, aggregationResultsFor2016DS)(spark)
 
-    assertSmallDatasetEquality(actualResultOfUpdate, updateExpectedResultsDS, ignoreNullable = true, orderedComparison = false)
 
+    //ignoring timestamps
+    assertSmallDatasetEquality(actualResultOfUpdate.drop("batch_timestamp"),
+                              updateExpectedResultsDS.drop("batch_timestamp"),
+                              ignoreNullable = true,
+                              orderedComparison = false)
 
-
-//    val rsvpEventName = spark.sql("select hotel_id from 2017data")
-//      .collect()
-//      .map(_.getAs[Long](0))
-//      .foreach(a => println(a))
-//    val updateExpectedResults = TestUtils.createDF(spark, aggregationResultFor2016, getTestStaticAggregationOutputSchema)
-
-
+    info("result DS for update with 2017 year seems to be correct")
 
   }
 

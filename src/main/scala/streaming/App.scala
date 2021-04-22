@@ -29,7 +29,7 @@ object App {
 
   val standardStayCond: Column = col(durationOfStay).between(2, 7)
   val standardExtendedStayCond: Column = col(durationOfStay).between(8, 14)
-  val longStayCond: Column = col(durationOfStay).between(15, 29)
+  val longStayCond: Column = col(durationOfStay).between(15, 30)
 
   //const for fields
   val hotelsWeatherTopic = "hotelDailyDataUnique"
@@ -126,7 +126,7 @@ object App {
     hotelDailyKafka.persist(StorageLevel.MEMORY_ONLY)
 
 
-    val result2016 = getAggregatedResultFor2016(expedia2016, hotelDailyKafka)
+    val result2016 = getAggregatedResultForASingleYear(expedia2016, hotelDailyKafka)
 
 
     ////2017/////
@@ -180,9 +180,9 @@ object App {
 
   /**
    *
-   * @param expedia2016 expedia data for 2016
+   * @param expedia expedia data
    * @param hotelDailyKafka hotel daily weather data from kafka
-   * @return aggregated data per task logic, namely:
+   * @return aggregated data by task logic, namely:
    *
    *         Read Expedia data for 2016 year from HDFS on WSL2 and enrich it with weather: add average temperature at checkin (join with hotels+weaher data from Kafka topic).
    *         Filter incoming data by having average temperature more than 0 Celsius degrees.
@@ -197,10 +197,10 @@ object App {
    *         Add most_popular_stay_type for a hotel (with max count)
    *
    */
-  def getAggregatedResultFor2016(expedia2016: Dataset[Row], hotelDailyKafka: Dataset[Row])(implicit spark : SparkSession): Dataset[Row] ={
+  def getAggregatedResultForASingleYear(expedia: Dataset[Row], hotelDailyKafka: Dataset[Row])(implicit spark : SparkSession): Dataset[Row] ={
     import spark.implicits._
 
-    val joinResult = expedia2016.as("exp")
+    val joinResult = expedia.as("exp")
       .join(hotelDailyKafka.as("hotelDaily"),
         $"hotelDaily.key" === $"exp.key"
       )

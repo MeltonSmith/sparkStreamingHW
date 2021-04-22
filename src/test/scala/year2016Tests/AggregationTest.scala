@@ -3,17 +3,18 @@ package year2016Tests
 import com.github.mrpowers.spark.fast.tests.DatasetComparer
 import model.VisitType
 import org.apache.spark.sql.Row
-import org.apache.spark.sql.types.{BooleanType, IntegerType, LongType, StringType, StructField}
-import org.joda.time.DateTime
 import org.scalatest.FunSpec
 import sessionWrapper.SparkSessionTestWrapper
 import streaming.App
 import testUtils.TestUtils
-import testUtils.TestUtils.{createExpediaRowForJoin, createHotelDailyRow, getTestExpediaAggregationInputSchema, getTestExpediaOutputSchema, getTestHotelDailyInputSchema, getTestStaticAggregationOutputSchema}
+import testUtils.TestUtils._
 
 /**
  * Created by: Ian_Rakhmatullin
  * Date: 21.04.2021
+ *
+ * Test for aggregation which is done by getAggregatedResultForASingleYear.
+ *
  */
 class AggregationTest extends FunSpec with SparkSessionTestWrapper with DatasetComparer{
   val firstHotelId = 111111111L
@@ -32,24 +33,24 @@ class AggregationTest extends FunSpec with SparkSessionTestWrapper with DatasetC
     // srch_ci, srch_co, children_cnt, hotel_id, withChildren, durationOfStay, key
     val filteredExpedia = Seq(
       //for hotel 1
-      createExpediaRowForJoin(date1, 1, firstHotelId, 0),
-      createExpediaRowForJoin(date1, 6, firstHotelId, 0),
-      createExpediaRowForJoin(date2, 10, firstHotelId, 0),
-      createExpediaRowForJoin(date3, 11, firstHotelId, 0),
+      createExpediaRowFiltered(date1, 1, firstHotelId, 0),
+      createExpediaRowFiltered(date1, 6, firstHotelId, 0),
+      createExpediaRowFiltered(date2, 10, firstHotelId, 0),
+      createExpediaRowFiltered(date3, 11, firstHotelId, 0),
 
       //for hotel 2 with children
-      createExpediaRowForJoin(date4, -47, secondHotelId, 1),
-      createExpediaRowForJoin(date4, 15, secondHotelId, 20),
-      createExpediaRowForJoin(date4, 16, secondHotelId, 42),
-      createExpediaRowForJoin(date4, 17, secondHotelId, 13),
-      createExpediaRowForJoin(date4, 4, secondHotelId, 1),
+      createExpediaRowFiltered(date4, -47, secondHotelId, 1),
+      createExpediaRowFiltered(date4, 15, secondHotelId, 20),
+      createExpediaRowFiltered(date4, 16, secondHotelId, 42),
+      createExpediaRowFiltered(date4, 17, secondHotelId, 13),
+      createExpediaRowFiltered(date4, 4, secondHotelId, 1),
         //without for hotel 2, but can be joint
-      createExpediaRowForJoin(date4, 1, secondHotelId, 0),
-      createExpediaRowForJoin(date5, 10, secondHotelId, 0),
+      createExpediaRowFiltered(date4, 1, secondHotelId, 0),
+      createExpediaRowFiltered(date5, 10, secondHotelId, 0),
 
         //some non joint data for hotel2 (weather data was filtered somehow)
-      createExpediaRowForJoin(date6, 1, secondHotelId, 0),
-      createExpediaRowForJoin(date7, 2, secondHotelId, 0),
+      createExpediaRowFiltered(date6, 1, secondHotelId, 0),
+      createExpediaRowFiltered(date7, 2, secondHotelId, 0),
     )
 
     // id(hotel_id), whr_date, avg_tmpr_c, key
@@ -82,11 +83,11 @@ class AggregationTest extends FunSpec with SparkSessionTestWrapper with DatasetC
     val expectedAggregationResultDs = TestUtils.createDF(spark, aggregationResult, getTestStaticAggregationOutputSchema)
 
     //output
-    val actualAggregationResult = App.getAggregatedResultFor2016(expediaRawDS, hotelDailyDS)(spark)
+    val actualAggregationResult = App.getAggregatedResultForASingleYear(expediaRawDS, hotelDailyDS)(spark)
 
     assertSmallDatasetEquality(actualAggregationResult, expectedAggregationResultDs, ignoreNullable = true, orderedComparison = false)
 
-    info("result DS for aggregation of 2016 year is correct")
+    info("result DS for aggregation of a single year is correct")
   }
 
 

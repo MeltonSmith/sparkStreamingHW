@@ -37,9 +37,9 @@ object VisitType extends Enumeration {
       VisitType.erroneous
     else if (stayDuration == 1)
       VisitType.short_stay
-    else if (stayDuration < 7 && stayDuration > 2)
+    else if (stayDuration <= 7 && stayDuration >= 2)
       VisitType.standard_stay
-    else if (stayDuration < 14 && stayDuration > 8)
+    else if (stayDuration <= 14 && stayDuration >= 8)
       VisitType.standard_extended_stay
     else
       VisitType.long_stay
