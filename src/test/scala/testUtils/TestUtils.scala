@@ -2,6 +2,7 @@ package testUtils
 
 import org.apache.spark.sql.{Row, SparkSession}
 import org.apache.spark.sql.types.{BooleanType, DoubleType, IntegerType, LongType, StringType, StructField, StructType}
+import org.joda.time.DateTime
 import streaming.App._
 
 import scala.collection.immutable
@@ -17,6 +18,18 @@ object TestUtils {
       StructType(schema)
     )
     expediaInputDF
+  }
+
+  def createHotelDailyRow(hotel_id: Long, checkInDate: String, tmprC: Double) = {
+    Row(hotel_id, checkInDate, tmprC, hotel_id + "/" + checkInDate)
+  }
+
+  def createExpediaRowForJoin(checkInDate: String, durationOfStay: Int, hotel_id: Long, childrenCount: Int) = {
+    val checkOutTimeStr = DateTime.parse(checkInDate)
+      .plusDays(durationOfStay)
+      .toString("yyyy-MM-dd")
+
+    Row(checkInDate, checkOutTimeStr, childrenCount, hotel_id, childrenCount > 0, durationOfStay, hotel_id + "/" + checkInDate)
   }
 
   def getTestExpediaOutputSchema: immutable.Seq[StructField] = {

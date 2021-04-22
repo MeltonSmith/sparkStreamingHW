@@ -9,7 +9,7 @@ import org.scalatest.FunSpec
 import sessionWrapper.SparkSessionTestWrapper
 import streaming.App
 import testUtils.TestUtils
-import testUtils.TestUtils.{getTestExpediaAggregationInputSchema, getTestExpediaOutputSchema, getTestHotelDailyInputSchema, getTestStaticAggregationOutputSchema}
+import testUtils.TestUtils.{createExpediaRowForJoin, createHotelDailyRow, getTestExpediaAggregationInputSchema, getTestExpediaOutputSchema, getTestHotelDailyInputSchema, getTestStaticAggregationOutputSchema}
 
 /**
  * Created by: Ian_Rakhmatullin
@@ -89,15 +89,5 @@ class AggregationTest extends FunSpec with SparkSessionTestWrapper with DatasetC
     info("result DS for aggregation of 2016 year is correct")
   }
 
-  private def createHotelDailyRow(hotel_id: Long, checkInDate: String, tmprC: Double) = {
-    Row(hotel_id, checkInDate, tmprC, hotel_id + "/" + checkInDate)
-  }
 
-  private def createExpediaRowForJoin(checkInDate: String, durationOfStay: Int, hotel_id: Long, childrenCount: Int) = {
-    val checkOutTimeStr = DateTime.parse(checkInDate)
-                        .plusDays(durationOfStay)
-                        .toString("yyyy-MM-dd")
-
-    Row(checkInDate, checkOutTimeStr, childrenCount, hotel_id, childrenCount > 0, durationOfStay, hotel_id + "/" + checkInDate)
-  }
 }
