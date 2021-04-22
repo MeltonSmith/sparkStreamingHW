@@ -145,22 +145,22 @@ object App {
 
     val finalResult = getFinalResultDS(expedia2017Stream, hotelDailyKafka, result2016)
 
-    val query = finalResult.writeStream
-      //                .writeStream
-      //                .outputMode("update")
-      //                .foreachBatch((batchDF: Dataset[HotelState], batchId: Long) =>
-      //                  if (!batchDF.isEmpty){
-      //                    batchDF
-      //                      .repartition(1) //due to small amount of the data
-      //                      .write
-      //                      .format("parquet")
-      //                      .save(s"/201 HW Dataset/finalResult/$batchId")
-      //                  }
-      //                )
-      //                .start()
-                        .format("console")
-                        .outputMode("update")
-                        .start()
+    val query = finalResult
+                      .writeStream
+                      .outputMode("update")
+                      .foreachBatch((batchDF: Dataset[HotelState], batchId: Long) =>
+                        if (!batchDF.isEmpty){
+                          batchDF
+                            .repartition(1) //due to small amount of the data
+                            .write
+                            .format("parquet")
+                            .save(s"/201 HW Dataset/finalResult/$batchId")
+                        }
+                      )
+                      .start()
+//                        .format("console")
+//                        .outputMode("update")
+//                        .start()
 
     query.awaitTermination()
   }
