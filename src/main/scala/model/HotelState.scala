@@ -8,13 +8,13 @@ package model
  */
 case class HotelState(hotel_id:Long, withChildren: Boolean,batch_timestamp:java.sql.Timestamp, var erroneous_data_cnt:Int,
                  var short_stay_cnt:Int, var standard_stay_cnt:Int, var standard_extended_stay_cnt:Int, var long_stay_cnt: Int,
-                 var most_popular_stay_type:VisitType.Value) {
+                 var most_popular_stay_type:String) {
 
   /**
    * Updates state in the group(grouped by hotel_id) with the particular visitType => by incrementing an appropriate count by 1
    * Also finds a new visit type (if applicable) for the new maximum value
    */
-  def updateState(visitType: VisitType.Value) : HotelState = {
+  def updateState(visitType: String) : HotelState = {
     increment(visitType)
 
     //if the visit type in state does not equal the current visit type from iterator
@@ -35,13 +35,13 @@ case class HotelState(hotel_id:Long, withChildren: Boolean,batch_timestamp:java.
   /**
    * increments an appropriate counter for a passed visit type
    */
-  private def increment(visitType: VisitType.Value) = {
+  private def increment(visitType: String) = {
     visitType match {
-      case VisitType.erroneous => this.erroneous_data_cnt = this.erroneous_data_cnt + 1
-      case VisitType.short_stay => this.short_stay_cnt = this.short_stay_cnt + 1
-      case VisitType.standard_stay => this.standard_stay_cnt = this.standard_stay_cnt + 1
-      case VisitType.standard_extended_stay => this.standard_extended_stay_cnt = this.standard_extended_stay_cnt + 1
-      case VisitType.long_stay => long_stay_cnt = long_stay_cnt + 1
+      case VisitType.erroneousStr => this.erroneous_data_cnt = this.erroneous_data_cnt + 1
+      case VisitType.shortStayStr => this.short_stay_cnt = this.short_stay_cnt + 1
+      case VisitType.standardStr => this.standard_stay_cnt = this.standard_stay_cnt + 1
+      case VisitType.standardExStr => this.standard_extended_stay_cnt = this.standard_extended_stay_cnt + 1
+      case VisitType.longStayStr => long_stay_cnt = long_stay_cnt + 1
       case _ => throw new UnsupportedOperationException("Wrong visit type")
     }
   }
@@ -49,13 +49,13 @@ case class HotelState(hotel_id:Long, withChildren: Boolean,batch_timestamp:java.
   /**
    * @return count for a passed visit type
    */
-  private def getCountByVisitType(visitType: VisitType.Value): Int ={
+  private def getCountByVisitType(visitType: String): Int ={
     visitType match {
-      case VisitType.erroneous => erroneous_data_cnt
-      case VisitType.short_stay => short_stay_cnt
-      case VisitType.standard_stay => standard_stay_cnt
-      case VisitType.standard_extended_stay =>  standard_extended_stay_cnt
-      case VisitType.long_stay =>  long_stay_cnt
+      case VisitType.erroneousStr => erroneous_data_cnt
+      case VisitType.shortStayStr => short_stay_cnt
+      case VisitType.standardStr => standard_stay_cnt
+      case VisitType.standardExStr =>  standard_extended_stay_cnt
+      case VisitType.longStayStr =>  long_stay_cnt
       case _ => throw new UnsupportedOperationException("Wrong visit type")
     }
   }

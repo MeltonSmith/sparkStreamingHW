@@ -14,7 +14,7 @@ package model
  * "Standard extended stay": 1-2 weeks
  * "Long stay": 2-4 weeks (less than month)
  */
-object VisitType extends Enumeration {
+object VisitType{
   //const
   val erroneousStr = "Erroneous"
   val shortStayStr = "Short Stay"
@@ -22,26 +22,19 @@ object VisitType extends Enumeration {
   val standardExStr = "Standard Extended Stay"
   val longStayStr = "Long Stay"
 
-
-  val erroneous: VisitType.Value = Value(erroneousStr)
-  val short_stay: VisitType.Value = Value(shortStayStr)
-  val standard_stay: VisitType.Value = Value(standardStr)
-  val standard_extended_stay: VisitType.Value = Value(standardExStr)
-  val long_stay: VisitType.Value = Value(longStayStr)
-
   /**
    * Defines the visit type based on stay duration
    */
-  def defineVisitType(stayDuration: Int): VisitType.Value ={
+  def defineVisitType(stayDuration: Int): String ={
     if (stayDuration > 30 || stayDuration < 0)
-      VisitType.erroneous
+      erroneousStr
     else if (stayDuration == 1)
-      VisitType.short_stay
+      shortStayStr
     else if (stayDuration <= 7 && stayDuration >= 2)
-      VisitType.standard_stay
+      standardStr
     else if (stayDuration <= 14 && stayDuration >= 8)
-      VisitType.standard_extended_stay
+      standardExStr
     else
-      VisitType.long_stay
+      longStayStr
   }
 }

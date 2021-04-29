@@ -8,6 +8,7 @@ import org.apache.spark.sql.types._
 import org.apache.spark.sql.{Column, DataFrame, Dataset, Row, SparkSession}
 import org.apache.spark.storage.StorageLevel
 import utils.Schemas.{getExpediaInputSchema, getHotelDailyValueSchema}
+import org.elasticsearch.spark.rdd.EsSpark
 
 /**
  *
@@ -74,16 +75,16 @@ object App {
         val standard_ex_cnt = getCount(row, standardExDataColumnNumber)
         val long_stay_cnt = getCount(row, longStayDataColumnNumber)
 
-        val stayType = VisitType.withName(Option(row.getAs[String](stayTypeColumnNumber)).getOrElse(erroneousStr))
+        val stayType = Option(row.getAs[String](stayTypeColumnNumber)).getOrElse(erroneousStr)
         val timeStamp = row.getTimestamp(batchTimeStampColumnNumber) //can't be null as we specified it explicitly
 
         val justCreatedState = HotelState(groupingKey.hotel_id, groupingKey.withChildren, timeStamp, err_cnt, short_cnt, standard_cnt, standard_ex_cnt, long_stay_cnt, stayType)
-        val visitType: VisitType.Value = getVisitTypeFromRow(row)
+        val visitType = getVisitTypeFromRow(row)
         justCreatedState.updateState(visitType)
       }
 
     for (input <- inputs) {
-      val visitType: VisitType.Value = getVisitTypeFromRow(input)
+      val visitType = getVisitTypeFromRow(input)
       state.updateState(visitType)
     }
     oldState.setTimeoutTimestamp(state.batch_timestamp.getTime + 2000)
@@ -94,7 +95,10 @@ object App {
   def main(args : Array[String]) {
     implicit val spark: SparkSession = SparkSession
                     .builder
-                    .appName("sparkStreamingHW2")
+                    .appName("sparkStreamingForElastic")
+                    .config("spark.es.nodes","localhost") //default
+                    .config("spark.es.port","9200")
+                    .config("spark.es.nodes.wan.only","true")
                     .getOrCreate()
 
     spark.sparkContext.setLogLevel("ERROR")
@@ -149,13 +153,17 @@ object App {
                       .writeStream
                       .outputMode("update")
                       .foreachBatch((batchDF: Dataset[HotelState], batchId: Long) =>
-                        if (!batchDF.isEmpty){
-                          batchDF
-                            .repartition(1) //due to small amount of the data
-                            .write
-                            .format("parquet")
-                            .save(s"/201 HW Dataset/finalResult/$batchId")
-                        }
+
+                        EsSpark.saveToEs(batchDF.toJavaRDD, "hotels/data")
+
+//                          batchDF.saveToEs("hotels/data")
+//                        if (!batchDF.isEmpty){
+//                          batchDF
+//                            .repartition(1) //due to small amount of the data
+//                            .write
+//                            .format("parquet")
+//                            .save(s"/201 HW Dataset/finalResult/$batchId")
+//                        }
                       )
                       .start()
 //                        .format("console")
