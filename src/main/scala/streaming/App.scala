@@ -1,14 +1,13 @@
 package streaming
 
 import model.VisitType._
-import model.{GroupingKey, HotelState, VisitType}
+import model.{GroupingKey, HotelState}
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.streaming.{GroupState, GroupStateTimeout}
 import org.apache.spark.sql.types._
-import org.apache.spark.sql.{Column, DataFrame, Dataset, Row, SparkSession}
+import org.apache.spark.sql._
 import org.apache.spark.storage.StorageLevel
 import utils.Schemas.{getExpediaInputSchema, getHotelDailyValueSchema}
-import org.elasticsearch.spark.rdd.EsSpark
 
 /**
  *
@@ -87,7 +86,6 @@ object App {
       val visitType = getVisitTypeFromRow(input)
       state.updateState(visitType)
     }
-    oldState.setTimeoutTimestamp(state.batch_timestamp.getTime + 2000)
     state
   }
 
@@ -96,9 +94,6 @@ object App {
     implicit val spark: SparkSession = SparkSession
                     .builder
                     .appName("sparkStreamingForElastic")
-                    .config("spark.es.nodes","localhost") //default
-                    .config("spark.es.port","9200")
-                    .config("spark.es.nodes.wan.only","true")
                     .getOrCreate()
 
     spark.sparkContext.setLogLevel("ERROR")
@@ -153,17 +148,13 @@ object App {
                       .writeStream
                       .outputMode("update")
                       .foreachBatch((batchDF: Dataset[HotelState], batchId: Long) =>
-
-                        EsSpark.saveToEs(batchDF.toJavaRDD, "hotels/data")
-
-//                          batchDF.saveToEs("hotels/data")
-//                        if (!batchDF.isEmpty){
-//                          batchDF
-//                            .repartition(1) //due to small amount of the data
-//                            .write
-//                            .format("parquet")
-//                            .save(s"/201 HW Dataset/finalResult/$batchId")
-//                        }
+                        if (!batchDF.isEmpty){
+                          batchDF
+                            .repartition(15)
+                            .write
+                            .format("parquet")
+                            .save(s"/201 HW Dataset/finalResultSplit/$batchId")
+                        }
                       )
                       .start()
 //                        .format("console")
@@ -270,7 +261,7 @@ object App {
         "r2016." + most_popular_stay_type,
         "batch_timestamp")
       .groupByKey(row => GroupingKey(row.getAs[Long](0), row.getAs[Boolean](1)))
-      .mapGroupsWithState(GroupStateTimeout.EventTimeTimeout())(updateFunction)
+      .mapGroupsWithState(GroupStateTimeout.NoTimeout())(updateFunction)
 
     finalResult
   }
