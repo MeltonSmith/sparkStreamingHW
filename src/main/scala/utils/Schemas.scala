@@ -1,6 +1,6 @@
 package utils
 
-import org.apache.spark.sql.types.{DoubleType, IntegerType, LongType, StringType, StructField}
+import org.apache.spark.sql.types.{BooleanType, DoubleType, IntegerType, LongType, StringType, StructField, TimestampType}
 import streaming.App.hotel_id
 
 /**
@@ -28,4 +28,17 @@ object Schemas {
     )
   }
 
+  def getHotelStateSchema = {
+    List(
+      StructField("hotel_id", LongType),
+      StructField("withChildren", BooleanType),
+      StructField("batch_timestamp", TimestampType),
+      StructField("erroneous_data_cnt", IntegerType),
+      StructField("short_stay_cnt", IntegerType),
+      StructField("standard_stay_cnt", IntegerType),
+      StructField("standard_extended_stay_cnt", IntegerType),
+      StructField("long_stay_cnt", IntegerType),
+      StructField("most_popular_stay_type", StringType)
+    )
+  }
 }
