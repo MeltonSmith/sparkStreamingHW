@@ -24,6 +24,10 @@ object TestUtils {
     Row(hotel_id, checkInDate, tmprC, hotel_id + "/" + checkInDate)
   }
 
+  def createHotelDailyRowAsInKafka(key: Long, value: String, timestamp: String) = {
+    Row(key, value, timestamp)
+  }
+
   def createExpediaRowFiltered(checkInDate: String, durationOfStay: Int, hotel_id: Long, childrenCount: Int) = {
     val checkOutTimeStr = DateTime.parse(checkInDate)
       .plusDays(durationOfStay)

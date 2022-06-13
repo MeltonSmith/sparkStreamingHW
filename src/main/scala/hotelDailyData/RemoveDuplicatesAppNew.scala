@@ -1,8 +1,8 @@
 package hotelDailyData
 
-import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.{DataFrame, SparkSession}
 import org.apache.spark.sql.expressions.Window
-import org.apache.spark.sql.functions.{col, desc, max, row_number}
+import org.apache.spark.sql.functions.{col, desc, expr, max, rank, row_number}
 import streaming.App.hotelsWeatherTopic
 
 /**
@@ -28,12 +28,11 @@ object RemoveDuplicatesAppNew {
                               .option("startingOffsets", "earliest")
                               .option("subscribe", hotelsWeatherTopic)
                               .load()
-                              .selectExpr("CAST(key AS STRING) as key", "CAST(value AS STRING) as value", "CAST(timestamp AS Timestamp) as timestamp")
-                              .select("key", "value", "timestamp")
-                              .groupBy("key")
-                              .agg(max("timestamp"))
 
-    hotelDailyKafka
+
+    val distinctHotelDaily = distinctByLastTimeStampForAGivenKey(hotelDailyKafka)
+
+    distinctHotelDaily
         .select("key", "value")
         .write
         .option("kafka.bootstrap.servers", "localhost:9094")
@@ -43,6 +42,16 @@ object RemoveDuplicatesAppNew {
 
     spark.close()
   }
+
+  def distinctByLastTimeStampForAGivenKey(dataFrame: DataFrame): DataFrame = {
+    dataFrame
+      .selectExpr("CAST(key AS STRING) as key", "CAST(value AS STRING) as value", "CAST(timestamp AS Timestamp) as timestamp")
+      .select("key", "value", "timestamp")
+      .withColumn("row_number", row_number().over(Window.partitionBy("key").orderBy(desc("timestamp"))))
+      .filter(expr("row_number == 1"))
+      .drop("row_number")
+  }
+
 }
 
 
